@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meshtastic Tile Generator GUI</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" />
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f5f5;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .header {
+            background: #2c3e50;
+            color: white;
+            padding: 1rem;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .main-container {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+        
+        .map-container {
+            flex: 1;
+            position: relative;
+        }
+        
+        #map {
+            width: 100%;
+            height: 100%;
+        }
+        
+        .controls {
+            width: 320px;
+            background: white;
+            padding: 1.5rem;
+            overflow-y: auto;
+            box-shadow: -2px 0 4px rgba(0,0,0,0.1);
+        }
+        
+        .control-group {
+            margin-bottom: 1.5rem;
+        }
+        
+        .control-group h3 {
+            margin-bottom: 0.5rem;
+            color: #2c3e50;
+            font-size: 1.1rem;
+        }
+        
+        .form-row {
+            display: flex;
+            gap: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .form-row label {
+            min-width: 60px;
+            font-size: 0.9rem;
+            color: #666;
+        }
+        
+        .form-row input {
+            flex: 1;
+            padding: 0.3rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 0.9rem;
+        }
+        
+        select, input[type="range"] {
+            width: 100%;
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            margin-bottom: 0.5rem;
+        }
+        
+        .zoom-display {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+        
+        .zoom-value {
+            font-weight: bold;
+            color: #2c3e50;
+        }
+        
+        .button {
+            width: 100%;
+            padding: 0.8rem;
+            background: #3498db;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1rem;
+            margin-bottom: 0.5rem;
+            transition: background 0.3s;
+        }
+        
+        .button:hover {
+            background: #2980b9;
+        }
+        
+        .button.secondary {
+            background: #95a5a6;
+        }
+        
+        .button.secondary:hover {
+            background: #7f8c8d;
+        }
+        
+        .button.danger {
+            background: #e74c3c;
+        }
+        
+        .button.danger:hover {
+            background: #c0392b;
+        }
+        
+        .stats {
+            background: #f8f9fa;
+            padding: 1rem;
+            border-radius: 4px;
+            margin-bottom: 1rem;
+        }
+        
+        .stats h4 {
+            margin-bottom: 0.5rem;
+            color: #2c3e50;
+        }
+        
+        .stat-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.3rem;
+            font-size: 0.9rem;
+        }
+        
+        .command-output {
+            background: #2c3e50;
+            color: #ecf0f1;
+            padding: 1rem;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 120px;
+            overflow-y: auto;
+            margin-bottom: 1rem;
+        }
+        
+        .instructions {
+            background: #e8f6f3;
+            padding: 1rem;
+            border-radius: 4px;
+            border-left: 4px solid #1abc9c;
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+        }
+        
+        .map-controls {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 1000;
+            background: white;
+            padding: 0.5rem;
+            border-radius: 4px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .map-controls select {
+            margin: 0;
+            padding: 0.3rem;
+            font-size: 0.85rem;
+        }
+        
+        .selection-info {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            z-index: 1000;
+            background: rgba(0,0,0,0.8);
+            color: white;
+            padding: 0.5rem;
+            border-radius: 4px;
+            font-size: 0.85rem;
+            min-width: 200px;
+        }
+        
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🗺️ Meshtastic Tile Generator</h1>
+        <p>Select area on map, choose zoom levels, generate command</p>
+    </div>
+    
+    <div class="main-container">
+        <div class="map-container">
+            <div id="map"></div>
+            <div class="map-controls">
+                <select id="mapStyle">
+                    <option value="osm">OpenStreetMap</option>
+                    <option value="satellite">Satellite</option>
+                    <option value="terrain">Terrain</option>
+                </select>
+            </div>
+            <div class="selection-info hidden" id="selectionInfo">
+                <div>Click and drag to select area</div>
+                <div id="boundsDisplay"></div>
+            </div>
+        </div>
+        
+        <div class="controls">
+            <div class="instructions">
+                <strong>How to use:</strong><br>
+                1. Click and drag on the map to select an area<br>
+                2. Choose your zoom levels and map source<br>
+                3. Copy the generated command and run it
+            </div>
+            
+            <div class="control-group">
+                <h3>📍 Area Selection</h3>
+                <div class="form-row">
+                    <label>North:</label>
+                    <input type="number" id="north" step="0.0001" placeholder="Latitude">
+                </div>
+                <div class="form-row">
+                    <label>South:</label>
+                    <input type="number" id="south" step="0.0001" placeholder="Latitude">
+                </div>
+                <div class="form-row">
+                    <label>East:</label>
+                    <input type="number" id="east" step="0.0001" placeholder="Longitude">
+                </div>
+                <div class="form-row">
+                    <label>West:</label>
+                    <input type="number" id="west" step="0.0001" placeholder="Longitude">
+                </div>
+                <button class="button secondary" onclick="centerOnCurrentArea()">Center Map on Area</button>
+                <button class="button secondary" onclick="clearSelection()">Clear Selection</button>
+            </div>
+            
+            <div class="control-group">
+                <h3>🔍 Zoom Levels</h3>
+                <div class="zoom-display">
+                    <label>Min Zoom:</label>
+                    <span class="zoom-value" id="minZoomValue">8</span>
+                </div>
+                <input type="range" id="minZoom" min="1" max="18" value="8" oninput="updateZoomDisplay()">
+                
+                <div class="zoom-display">
+                    <label>Max Zoom:</label>
+                    <span class="zoom-value" id="maxZoomValue">12</span>
+                </div>
+                <input type="range" id="maxZoom" min="1" max="18" value="12" oninput="updateZoomDisplay()">
+            </div>
+            
+            <div class="control-group">
+                <h3>🗺️ Map Source</h3>
+                <select id="tileSource">
+                    <option value="osm">OpenStreetMap</option>
+                    <option value="satellite">Satellite</option>
+                    <option value="terrain">Terrain</option>
+                    <option value="cycle">Cycle</option>
+                </select>
+            </div>
+            
+            <div class="control-group">
+                <h3>⚙️ Advanced Options</h3>
+                <div class="form-row">
+                    <label>Delay:</label>
+                    <input type="number" id="delay" value="0.2" step="0.1" min="0.1">
+                </div>
+                <div class="form-row">
+                    <label>Workers:</label>
+                    <input type="number" id="workers" value="3" min="1" max="10">
+                </div>
+                <div class="form-row">
+                    <label>Output:</label>
+                    <input type="text" id="outputDir" value="tiles" placeholder="Output directory">
+                </div>
+            </div>
+            
+            <div class="stats" id="stats">
+                <h4>📊 Estimated Storage</h4>
+                <div class="stat-row">
+                    <span>Total tiles:</span>
+                    <span id="totalTiles">Select area first</span>
+                </div>
+                <div class="stat-row">
+                    <span>Estimated size:</span>
+                    <span id="estimatedSize">-</span>
+                </div>
+                <div class="stat-row">
+                    <span>Resolution:</span>
+                    <span id="resolution">-</span>
+                </div>
+            </div>
+            
+            <button class="button" onclick="generateCommand()">🚀 Generate Command</button>
+            <button class="button secondary" onclick="copyCommand()">📋 Copy Command</button>
+            
+            <div class="command-output" id="commandOutput">
+Select an area on the map to generate command...
+            </div>
+            
+            <div class="control-group">
+                <h3>🌟 Quick Presets</h3>
+                <button class="button secondary" onclick="setPreset('city')">City (10-14)</button>
+                <button class="button secondary" onclick="setPreset('regional')">Regional (8-12)</button>
+                <button class="button secondary" onclick="setPreset('continental')">Continental (6-10)</button>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+    <script>
+        // Global variables
+        let map;
+        let selectionRectangle = null;
+        let isSelecting = false;
+        let startPoint = null;
+        let currentTileLayer = null;
+        
+        // Map tile layers
+        const tileLayers = {
+            osm: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            satellite: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+            terrain: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png'
+        };
+        
+        // Initialize map
+        function initMap() {
+            map = L.map('map').setView([39.7392, -104.9903], 8); // Denver
+            
+            // Add default tile layer
+            currentTileLayer = L.tileLayer(tileLayers.osm, {
+                attribution: '© OpenStreetMap contributors'
+            }).addTo(map);
+            
+            // Add selection functionality
+            map.on('mousedown', onMouseDown);
+            map.on('mousemove', onMouseMove);
+            map.on('mouseup', onMouseUp);
+            
+            // Prevent default selection behavior
+            map.dragging.disable();
+            map.on('mousedown', function() { map.dragging.disable(); });
+            map.on('mouseup', function() { map.dragging.enable(); });
+        }
+        
+        // Mouse event handlers for area selection
+        function onMouseDown(e) {
+            isSelecting = true;
+            startPoint = e.latlng;
+            
+            if (selectionRectangle) {
+                map.removeLayer(selectionRectangle);
+            }
+            
+            document.getElementById('selectionInfo').classList.remove('hidden');
+        }
+        
+        function onMouseMove(e) {
+            if (!isSelecting || !startPoint) return;
+            
+            const bounds = L.latLngBounds(startPoint, e.latlng);
+            
+            if (selectionRectangle) {
+                map.removeLayer(selectionRectangle);
+            }
+            
+            selectionRectangle = L.rectangle(bounds, {
+                color: '#3498db',
+                weight: 2,
+                fill: true,
+                fillOpacity: 0.2
+            }).addTo(map);
+            
+            updateBoundsDisplay(bounds);
+        }
+        
+        function onMouseUp(e) {
+            if (!isSelecting || !startPoint) return;
+            
+            isSelecting = false;
+            const bounds = L.latLngBounds(startPoint, e.latlng);
+            
+            // Update form fields
+            document.getElementById('north').value = bounds.getNorth().toFixed(6);
+            document.getElementById('south').value = bounds.getSouth().toFixed(6);
+            document.getElementById('east').value = bounds.getEast().toFixed(6);
+            document.getElementById('west').value = bounds.getWest().toFixed(6);
+            
+            updateBoundsDisplay(bounds);
+            calculateStats();
+            generateCommand();
+            
+            startPoint = null;
+        }
+        
+        // Update bounds display
+        function updateBoundsDisplay(bounds) {
+            const display = document.getElementById('boundsDisplay');
+            display.innerHTML = `
+                N: ${bounds.getNorth().toFixed(4)}<br>
+                S: ${bounds.getSouth().toFixed(4)}<br>
+                E: ${bounds.getEast().toFixed(4)}<br>
+                W: ${bounds.getWest().toFixed(4)}
+            `;
+        }
+        
+        // Change map style
+        function changeMapStyle() {
+            const style = document.getElementById('mapStyle').value;
+            
+            if (currentTileLayer) {
+                map.removeLayer(currentTileLayer);
+            }
+            
+            currentTileLayer = L.tileLayer(tileLayers[style], {
+                attribution: style === 'osm' ? '© OpenStreetMap contributors' : '© Map tiles'
+            }).addTo(map);
+        }
+        
+        // Utility functions
+        function deg2num(lat, lon, zoom) {
+            const latRad = lat * Math.PI / 180;
+            const n = Math.pow(2, zoom);
+            const x = Math.floor((lon + 180) / 360 * n);
+            const y = Math.floor((1 - Math.asinh(Math.tan(latRad)) / Math.PI) / 2 * n);
+            return {x, y};
+        }
+        
+        function calculateTileCount(north, south, east, west, zoom) {
+            const topLeft = deg2num(north, west, zoom);
+            const bottomRight = deg2num(south, east, zoom);
+            
+            const width = Math.abs(bottomRight.x - topLeft.x) + 1;
+            const height = Math.abs(bottomRight.y - topLeft.y) + 1;
+            
+            return width * height;
+        }
+        
+        function calculateStats() {
+            const north = parseFloat(document.getElementById('north').value);
+            const south = parseFloat(document.getElementById('south').value);
+            const east = parseFloat(document.getElementById('east').value);
+            const west = parseFloat(document.getElementById('west').value);
+            const minZoom = parseInt(document.getElementById('minZoom').value);
+            const maxZoom = parseInt(document.getElementById('maxZoom').value);
+            
+            if (isNaN(north) || isNaN(south) || isNaN(east) || isNaN(west)) {
+                document.getElementById('totalTiles').textContent = 'Select area first';
+                document.getElementById('estimatedSize').textContent = '-';
+                document.getElementById('resolution').textContent = '-';
+                return;
+            }
+            
+            let totalTiles = 0;
+            for (let zoom = minZoom; zoom <= maxZoom; zoom++) {
+                totalTiles += calculateTileCount(north, south, east, west, zoom);
+            }
+            
+            const estimatedMB = totalTiles * 15 / 1024; // ~15KB per tile
+            const avgZoom = (minZoom + maxZoom) / 2;
+            const resolution = 40075017 * Math.cos(((north + south) / 2) * Math.PI / 180) / Math.pow(2, avgZoom + 8);
+            
+            document.getElementById('totalTiles').textContent = totalTiles.toLocaleString();
+            document.getElementById('estimatedSize').textContent = estimatedMB < 1024 ? 
+                `${estimatedMB.toFixed(1)} MB` : `${(estimatedMB/1024).toFixed(1)} GB`;
+            document.getElementById('resolution').textContent = `${resolution.toFixed(0)}m/px`;
+        }
+        
+        function generateCommand() {
+            const north = document.getElementById('north').value;
+            const south = document.getElementById('south').value;
+            const east = document.getElementById('east').value;
+            const west = document.getElementById('west').value;
+            const minZoom = document.getElementById('minZoom').value;
+            const maxZoom = document.getElementById('maxZoom').value;
+            const source = document.getElementById('tileSource').value;
+            const delay = document.getElementById('delay').value;
+            const workers = document.getElementById('workers').value;
+            const outputDir = document.getElementById('outputDir').value;
+            
+            if (!north || !south || !east || !west) {
+                document.getElementById('commandOutput').textContent = 'Select an area on the map first...';
+                return;
+            }
+            
+            const command = `python meshtastic_tiles.py --coords --north ${north} --south ${south} --east ${east} --west ${west} --min-zoom ${minZoom} --max-zoom ${maxZoom} --source ${source} --delay ${delay} --max-workers ${workers} --output-dir ${outputDir}`;
+            
+            document.getElementById('commandOutput').textContent = command;
+        }
+        
+        function copyCommand() {
+            const command = document.getElementById('commandOutput').textContent;
+            navigator.clipboard.writeText(command).then(() => {
+                const button = document.querySelector('button[onclick="copyCommand()"]');
+                const originalText = button.textContent;
+                button.textContent = '✅ Copied!';
+                setTimeout(() => {
+                    button.textContent = originalText;
+                }, 2000);
+            });
+        }
+        
+        function updateZoomDisplay() {
+            document.getElementById('minZoomValue').textContent = document.getElementById('minZoom').value;
+            document.getElementById('maxZoomValue').textContent = document.getElementById('maxZoom').value;
+            calculateStats();
+            generateCommand();
+        }
+        
+        function centerOnCurrentArea() {
+            const north = parseFloat(document.getElementById('north').value);
+            const south = parseFloat(document.getElementById('south').value);
+            const east = parseFloat(document.getElementById('east').value);
+            const west = parseFloat(document.getElementById('west').value);
+            
+            if (!isNaN(north) && !isNaN(south) && !isNaN(east) && !isNaN(west)) {
+                const bounds = L.latLngBounds([south, west], [north, east]);
+                map.fitBounds(bounds);
+            }
+        }
+        
+        function clearSelection() {
+            if (selectionRectangle) {
+                map.removeLayer(selectionRectangle);
+                selectionRectangle = null;
+            }
+            
+            document.getElementById('north').value = '';
+            document.getElementById('south').value = '';
+            document.getElementById('east').value = '';
+            document.getElementById('west').value = '';
+            document.getElementById('selectionInfo').classList.add('hidden');
+            document.getElementById('commandOutput').textContent = 'Select an area on the map to generate command...';
+            
+            calculateStats();
+        }
+        
+        function setPreset(type) {
+            switch(type) {
+                case 'city':
+                    document.getElementById('minZoom').value = 10;
+                    document.getElementById('maxZoom').value = 14;
+                    break;
+                case 'regional':
+                    document.getElementById('minZoom').value = 8;
+                    document.getElementById('maxZoom').value = 12;
+                    break;
+                case 'continental':
+                    document.getElementById('minZoom').value = 6;
+                    document.getElementById('maxZoom').value = 10;
+                    break;
+            }
+            updateZoomDisplay();
+        }
+        
+        // Event listeners
+        document.getElementById('mapStyle').addEventListener('change', changeMapStyle);
+        document.getElementById('tileSource').addEventListener('change', generateCommand);
+        document.getElementById('delay').addEventListener('input', generateCommand);
+        document.getElementById('workers').addEventListener('input', generateCommand);
+        document.getElementById('outputDir').addEventListener('input', generateCommand);
+        
+        // Manual coordinate input listeners
+        ['north', 'south', 'east', 'west'].forEach(id => {
+            document.getElementById(id).addEventListener('input', () => {
+                calculateStats();
+                generateCommand();
+            });
+        });
+        
+        // Initialize everything
+        initMap();
+    </script>
+</body>
+</html>
