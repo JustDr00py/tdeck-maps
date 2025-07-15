@@ -29,6 +29,29 @@ python meshtastic_tiles.py --city "San Francisco" --min-zoom 8 --max-zoom 12
 
 ## 🎯 Usage Methods
 
+### ⚠️ Important: Handling Spaces in City Names
+
+**Always use quotes around city names**, especially those with spaces:
+
+```bash
+# ✅ Correct - use quotes
+python meshtastic_tiles.py --city "New York"
+python meshtastic_tiles.py --city "Los Angeles" 
+python meshtastic_tiles.py --city "Salt Lake City"
+
+# ❌ Wrong - shell will break this into separate arguments
+python meshtastic_tiles.py --city New York
+```
+
+**For multiple cities with spaces:**
+```bash
+# ✅ Correct - quotes around entire argument, semicolons inside
+python meshtastic_tiles.py --cities "New York; Los Angeles; Las Vegas"
+
+# ❌ Wrong - will cause errors
+python meshtastic_tiles.py --cities New York; Los Angeles
+```
+
 ### Method 1: Single City (Recommended for beginners)
 
 Generate tiles around a specific city:
@@ -37,8 +60,14 @@ Generate tiles around a specific city:
 # Basic city with 20km buffer (default)
 python meshtastic_tiles.py --city "Denver" --min-zoom 8 --max-zoom 12
 
-# City with custom buffer
+# Cities with spaces in names (use quotes!)
+python meshtastic_tiles.py --city "New York" --min-zoom 10 --max-zoom 13
+python meshtastic_tiles.py --city "Los Angeles" --min-zoom 8 --max-zoom 12
+python meshtastic_tiles.py --city "Salt Lake City" --min-zoom 8 --max-zoom 12
+
+# City with state for precision (especially useful for common names)
 python meshtastic_tiles.py --city "Portland, Oregon" --buffer 50 --min-zoom 8 --max-zoom 12
+python meshtastic_tiles.py --city "Kansas City, Missouri" --min-zoom 8 --max-zoom 12
 
 # High detail for local area
 python meshtastic_tiles.py --city "Austin" --buffer 30 --min-zoom 10 --max-zoom 14
@@ -49,15 +78,23 @@ python meshtastic_tiles.py --city "Austin" --buffer 30 --min-zoom 10 --max-zoom 
 Create optimal coverage for multiple cities (great for road trips):
 
 ```bash
-# Bay Area coverage
+# Bay Area coverage (note: quotes around entire argument)
 python meshtastic_tiles.py --cities "San Francisco; Oakland; San Jose" --min-zoom 8 --max-zoom 12
 
-# Road trip route
+# Cities with spaces - still use semicolon separators inside quotes
+python meshtastic_tiles.py --cities "New York; Los Angeles; Las Vegas" --min-zoom 8 --max-zoom 11
+
+# Road trip route with spaces and states
 python meshtastic_tiles.py --cities "Los Angeles; Bakersfield; Fresno; Modesto; Sacramento; San Francisco" --min-zoom 8 --max-zoom 11
+
+# Mix of cities with and without spaces
+python meshtastic_tiles.py --cities "Salt Lake City; Denver; Kansas City, Missouri; Oklahoma City" --min-zoom 8 --max-zoom 11
 
 # Regional coverage with larger buffer
 python meshtastic_tiles.py --cities "Seattle; Tacoma; Olympia" --buffer 40 --min-zoom 8 --max-zoom 12
 ```
+
+**💡 Important**: Always use quotes around the entire `--cities` argument, and separate cities with semicolons (`;`).
 
 ### Method 3: Predefined Regions
 
@@ -200,15 +237,12 @@ python meshtastic_tiles.py --sample-only
 ## 🔧 T-Deck Integration
 
 1. **Generate tiles** using this script
-2. **Create Directory on SD Card** maps/oms
-3. **Copy all the folders** from inside tiles to /maps/oms on your SD card.
-It should look like this:
-```
-/maps/oms/0/
-/maps/oms/1/
-/maps/oms/3/
-...
-```
+2. **Copy tiles folder** to your T-Deck's SD card root directory
+3. **Configure Meshtastic** to use offline tiles:
+   - Open Meshtastic app
+   - Go to Settings → Display → Map
+   - Enable "Offline Maps"
+   - Select your tiles directory
 
 ## ⚠️ Important Notes
 
@@ -220,10 +254,11 @@ It should look like this:
 
 ## 🐛 Troubleshooting
 
-**"No tiles downloaded":**
-- Check your internet connection
-- Verify city name spelling
-- Try adding state/country: `"Portland, Oregon"`
+**"City not found" errors:**
+- Check your city name spelling
+- Use quotes around city names: `--city "New York"` not `--city New York`
+- Try adding state/country: `"Portland, Oregon"` instead of just `"Portland"`
+- For multiple cities, use quotes around the entire argument: `--cities "New York; Los Angeles"`
 
 **"Permission denied" errors:**
 - Make sure you have write permissions to the output directory
