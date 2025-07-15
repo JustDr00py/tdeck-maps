@@ -200,12 +200,15 @@ python meshtastic_tiles.py --sample-only
 ## 🔧 T-Deck Integration
 
 1. **Generate tiles** using this script
-2. **Copy tiles folder** to your T-Deck's SD card root directory
-3. **Configure Meshtastic** to use offline tiles:
-   - Open Meshtastic app
-   - Go to Settings → Display → Map
-   - Enable "Offline Maps"
-   - Select your tiles directory
+2. **Create Directory on SD Card** maps/oms
+3. **Copy all the folders** from inside tiles to /maps/oms on your SD card.
+It should look like this:
+```
+/maps/oms/0/
+/maps/oms/1/
+/maps/oms/3/
+...
+```
 
 ## ⚠️ Important Notes
 
