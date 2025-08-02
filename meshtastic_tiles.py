@@ -53,6 +53,10 @@ class CityLookup:
                 'name': result.get('display_name', 'Unknown'),
                 'lat': float(result['lat']),
                 'lon': float(result['lon']),
+                'south': float(result['boundingbox'][0]),
+                'north': float(result['boundingbox'][1]),
+                'west': float(result['boundingbox'][2]),
+                'east': float(result['boundingbox'][3]),
                 'type': result.get('type', 'unknown')
             }
             
@@ -85,16 +89,18 @@ class CityLookup:
             return None
         
         # Calculate bounding box
-        lats = [c['lat'] for c in all_coords]
-        lons = [c['lon'] for c in all_coords]
+        norths = [c['north'] for c in all_coords]
+        souths = [c['south'] for c in all_coords]
+        easts = [c['east'] for c in all_coords]
+        wests = [c['west'] for c in all_coords]
         
         # Convert km buffer to degrees (approximate)
         buffer_deg = buffer_km / 111.0  # ~111km per degree
         
-        north = max(lats) + buffer_deg
-        south = min(lats) - buffer_deg
-        east = max(lons) + buffer_deg
-        west = min(lons) - buffer_deg
+        north = max(norths) + buffer_deg
+        south = min(souths) - buffer_deg
+        east = max(easts) + buffer_deg
+        west = min(wests) - buffer_deg
         
         print(f"\n📦 Bounding box for {len(all_coords)} cities (±{buffer_km}km buffer):")
         print(f"   North: {north:.4f}")
@@ -416,10 +422,10 @@ def main():
         
         # Create bounding box around city
         buffer_deg = args.buffer / 111.0  # Convert km to degrees
-        north = coord['lat'] + buffer_deg
-        south = coord['lat'] - buffer_deg
-        east = coord['lon'] + buffer_deg
-        west = coord['lon'] - buffer_deg
+        north = coord['north'] + buffer_deg
+        south = coord['south'] - buffer_deg
+        east = coord['east'] + buffer_deg
+        west = coord['west'] - buffer_deg
         area_name = args.city
         
     elif args.cities:
