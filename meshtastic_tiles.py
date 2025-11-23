@@ -393,7 +393,7 @@ def main():
     # Tile generation options
     parser.add_argument('--min-zoom', type=int, default=8, help='Minimum zoom level')
     parser.add_argument('--max-zoom', type=int, default=12, help='Maximum zoom level')
-    parser.add_argument('--source', default='osm', choices=['osm', 'satellite', 'terrain', 'cycle'],
+    parser.add_argument('--source', default='osm', choices=['osm', 'satellite', 'terrain', 'cycle', 'Google_Terrain_Hybrid', 'CartoDb_Dark_Matter'],
                         help='Map source')
     parser.add_argument('--output-dir', default='tiles', help='Output directory')
     parser.add_argument('--delay', type=float, default=0.2, help='Delay between requests (seconds)')
