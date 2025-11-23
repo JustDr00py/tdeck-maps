@@ -145,7 +145,10 @@ class MeshtasticTileGenerator:
             "osm": f"https://tile.openstreetmap.org/{zoom}/{x}/{y}.png",
             "satellite": f"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{zoom}/{y}/{x}",
             "terrain": f"https://tile.opentopomap.org/{zoom}/{x}/{y}.png",
-            "cycle": f"https://tile.thunderforest.com/cycle/{zoom}/{x}/{y}.png"
+            "cycle": f"https://tile.thunderforest.com/cycle/{zoom}/{x}/{y}.png",
+            "Google_Sat_Hybrid": f"https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={zoom}",
+            "CartoDb_Dark_Matter": f"http://basemaps.cartocdn.com/dark_all/{zoom}/{x}/{y}.png",
+            #"custom_tile_server": f __fill in custom url path here__/{zoom}/{x}/{y}.png"       #This path will require a custom tile server, preferably a local server.
         }
         return sources.get(source, sources["osm"])
     
@@ -344,7 +347,25 @@ def get_region_bounds(region):
             'south': 54.4,   # Aleutian Islands
             'east': -129.9,  # Canadian border
             'west': -172.4   # Aleutian Islands
-        }
+        },
+        'florida': {
+            'north': 31.44,  # Alabama/Georgia
+            'south': 24.1,   # Strait of Florida
+            'east': -79.11,  # Alantic Ocean
+            'west': -88.38,  # Gulf of Mexico
+        },
+        'georgia': {
+            'north': 35.2,   # Tennesse/North Carolina
+            'south': 30.36,  # Florida
+            'east': -80.75,  # Alantic Ocean
+            'west': -85.79,  # Alabama
+        },
+        'deep_southeast_usa': {
+            'north': 35.2,   # Washington to Saint Louisiana
+            'south': 30.36,  # Strait of Florida
+            'east': -80.75,  # Alantic Ocean
+            'west': -85.79,  # Mississippi
+        },
     }
     return regions.get(region.lower())
 
@@ -354,7 +375,7 @@ def main():
     # Method selection (mutually exclusive)
     method_group = parser.add_mutually_exclusive_group(required=True)
     method_group.add_argument('--region', type=str, 
-                        choices=['north_america', 'usa', 'canada', 'mexico', 'california', 'texas', 'alaska'],
+                        choices=['north_america', 'usa', 'canada', 'mexico', 'california', 'texas', 'alaska', 'florida'],
                         help='Predefined region')
     method_group.add_argument('--city', type=str, help='City name (e.g., "San Francisco" or "Portland, Oregon")')
     method_group.add_argument('--cities', type=str, help='Multiple cities separated by semicolons (e.g., "San Francisco; Oakland; San Jose")')
@@ -372,7 +393,7 @@ def main():
     # Tile generation options
     parser.add_argument('--min-zoom', type=int, default=8, help='Minimum zoom level')
     parser.add_argument('--max-zoom', type=int, default=12, help='Maximum zoom level')
-    parser.add_argument('--source', default='osm', choices=['osm', 'satellite', 'terrain', 'cycle'],
+    parser.add_argument('--source', default='osm', choices=['osm', 'satellite', 'terrain', 'cycle', 'Google_Terrain_Hybrid', 'CartoDb_Dark_Matter'],
                         help='Map source')
     parser.add_argument('--output-dir', default='tiles', help='Output directory')
     parser.add_argument('--delay', type=float, default=0.2, help='Delay between requests (seconds)')

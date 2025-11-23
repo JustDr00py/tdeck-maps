@@ -110,7 +110,7 @@ python meshtastic_tiles.py --region usa --min-zoom 4 --max-zoom 8
 python meshtastic_tiles.py --region north_america --min-zoom 4 --max-zoom 8
 ```
 
-**Available regions:** `north_america`, `usa`, `canada`, `mexico`, `california`, `texas`, `alaska`
+**Available regions:** `north_america`, `usa`, `canada`, `mexico`, `california`, `texas`, `alaska`, `florida`, `georgia`, `deep_southeast_usa`
 
 ### Method 4: Custom Coordinates
 
@@ -136,6 +136,15 @@ python meshtastic_tiles.py --city "Denver" --source terrain
 
 # Cycling-focused
 python meshtastic_tiles.py --city "Denver" --source cycle
+
+# Google Earth Hybrid
+python meshtastic_tiles.py --city "Denver" --source Google_Terrain_Hybrid
+
+# CartoDb Dark Matter
+python meshtastic_tiles.py --city "Denver" --source CartoDb_Dark_Matter
+
+# Custom Title Server (Point to a custom URL in script)
+python meshtastic_tiles.py --city "Denver" --source custom_tile_server
 ```
 
 ## 🔍 Zoom Levels Guide

@@ -226,6 +226,9 @@
                     <option value="osm">OpenStreetMap</option>
                     <option value="satellite">Satellite</option>
                     <option value="terrain">Terrain</option>
+					<option value="cycle">Cycle</option>
+					<option value="Google_Sat_Hybrid">GoogleSatHybrid</option>
+					<option value="CartoDb_Dark_Matter">CartoDarkMatter</option>
                 </select>
             </div>
             <div class="selection-info hidden" id="selectionInfo">
@@ -286,6 +289,8 @@
                     <option value="satellite">Satellite</option>
                     <option value="terrain">Terrain</option>
                     <option value="cycle">Cycle</option>
+					<option value="Google_Sat_Hybrid">GoogleSatHybrid</option>
+					<option value="CartoDb_Dark_Matter">CartoDarkMatter</option>
                 </select>
             </div>
             
@@ -351,6 +356,9 @@ Select an area on the map to generate command...
             osm: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
             satellite: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
             terrain: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png'
+			cycle: f"https://tile.thunderforest.com/cycle/{zoom}/{x}/{y}.png",
+            Google_Sat_Hybrid: f"https://mt1.google.com/vt/lyrs=y&x={x}&y={y}&z={zoom}",
+            CartoDb_Dark_Matter: f"http://basemaps.cartocdn.com/dark_all/{zoom}/{x}/{y}.png",
         };
         
         // Initialize map
