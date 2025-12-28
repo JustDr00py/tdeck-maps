@@ -6,7 +6,7 @@ Generate offline map tiles for your Meshtastic T-Deck device! This tool download
 
 1. **Install dependencies:**
 ```bash
-pip install pillow requests
+pip install pillow requests tqdm
 ```
 
 2. **Generate tiles for your city:**
@@ -276,7 +276,6 @@ Found a bug or want to add features? Contributions welcome!
 Common improvements needed:
 - Additional map sources
 - Better error handling
-- Progress bars
 - Tile format conversion
 - Batch processing scripts
 

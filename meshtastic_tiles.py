@@ -4,16 +4,23 @@ Meshtastic Map Tile Generator for T-Deck
 Generates map tiles from various sources for offline use
 """
 
-import os
-import sys
 import math
 import time
+import argparse
+import json
+from enum import Enum
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 import requests
 from PIL import Image, ImageDraw, ImageFont
-import argparse
-from pathlib import Path
-import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from tqdm import tqdm
+
+
+class DownloadStatus(Enum):
+    DOWNLOADED = "downloaded"
+    CACHED = "cached"
+    FAILED = "failed"
 
 class CityLookup:
     def __init__(self):
@@ -49,10 +56,15 @@ class CityLookup:
                 return None
             
             result = data[0]
+            bbox = result['boundingbox']
             return {
                 'name': result.get('display_name', 'Unknown'),
                 'lat': float(result['lat']),
                 'lon': float(result['lon']),
+                'north': float(bbox[1]),
+                'south': float(bbox[0]),
+                'east': float(bbox[3]),
+                'west': float(bbox[2]),
                 'type': result.get('type', 'unknown')
             }
             
@@ -84,17 +96,19 @@ class CityLookup:
             print("No valid coordinates found")
             return None
         
-        # Calculate bounding box
-        lats = [c['lat'] for c in all_coords]
-        lons = [c['lon'] for c in all_coords]
+        # Calculate bounding box from city boundaries
+        norths = [c['north'] for c in all_coords]
+        souths = [c['south'] for c in all_coords]
+        easts = [c['east'] for c in all_coords]
+        wests = [c['west'] for c in all_coords]
         
         # Convert km buffer to degrees (approximate)
         buffer_deg = buffer_km / 111.0  # ~111km per degree
         
-        north = max(lats) + buffer_deg
-        south = min(lats) - buffer_deg
-        east = max(lons) + buffer_deg
-        west = min(lons) - buffer_deg
+        north = max(norths) + buffer_deg
+        south = min(souths) - buffer_deg
+        east = max(easts) + buffer_deg
+        west = min(wests) - buffer_deg
         
         print(f"\n📦 Bounding box for {len(all_coords)} cities (±{buffer_km}km buffer):")
         print(f"   North: {north:.4f}")
@@ -161,7 +175,7 @@ class MeshtasticTileGenerator:
         
         # Skip if tile already exists
         if tile_path.exists():
-            return tile_path, True
+            return tile_path, DownloadStatus.CACHED
         
         try:
             response = self.session.get(url, timeout=10)
@@ -172,17 +186,19 @@ class MeshtasticTileGenerator:
                 f.write(response.content)
             
             time.sleep(self.delay)  # Be respectful to tile servers
-            return tile_path, True
+            return tile_path, DownloadStatus.DOWNLOADED
             
         except Exception as e:
             print(f"Error downloading tile {x},{y},{zoom}: {e}")
-            return None, False
+            return None, DownloadStatus.FAILED
     
-    def generate_tiles(self, north, south, east, west, min_zoom=8, max_zoom=16, source="osm", max_workers=4):
+    def generate_tiles(self, north, south, east, west, min_zoom=8, max_zoom=16, source="osm", max_workers=4, region_name=None):
         """Generate tiles for a bounding box"""
         print(f"Generating tiles for bounds: N:{north}, S:{south}, E:{east}, W:{west}")
         print(f"Zoom levels: {min_zoom} to {max_zoom}")
         print(f"Source: {source}")
+        print(f"Output: {self.output_dir}")
+        print(f"Workers: {max_workers}, Delay: {self.delay}s")
         
         # Validate coordinates
         if north <= south:
@@ -193,7 +209,9 @@ class MeshtasticTileGenerator:
             return
         
         total_tiles = 0
-        downloaded_tiles = 0
+        new_tiles = 0
+        cached_tiles = 0
+        failed_tiles = 0
         
         # Calculate total tiles for progress tracking
         for zoom in range(min_zoom, max_zoom + 1):
@@ -218,6 +236,7 @@ class MeshtasticTileGenerator:
             return
         
         # Download tiles with threading
+        start_time = time.time()
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = []
             
@@ -240,37 +259,100 @@ class MeshtasticTileGenerator:
                         futures.append(future)
             
             # Process completed downloads
-            for future in as_completed(futures):
-                tile_path, success = future.result()
-                if success:
-                    downloaded_tiles += 1
-                
-                if downloaded_tiles % 100 == 0:
-                    print(f"Downloaded {downloaded_tiles}/{total_tiles} tiles")
+            with tqdm(total=total_tiles, desc="Downloading", unit="tile") as pbar:
+                for future in as_completed(futures):
+                    try:
+                        tile_path, status = future.result()
+                        if status == DownloadStatus.DOWNLOADED:
+                            new_tiles += 1
+                            pbar.update(1)
+                        elif status == DownloadStatus.CACHED:
+                            cached_tiles += 1
+                            pbar.total -= 1  # Remove from total so ETA reflects actual downloads
+                            pbar.refresh()
+                        elif status == DownloadStatus.FAILED:
+                            failed_tiles += 1
+                            pbar.update(1)
+                    except Exception:
+                        failed_tiles += 1
+                        pbar.update(1)
+                    pbar.set_postfix(new=new_tiles, cached=cached_tiles)
         
-        print(f"Completed! Downloaded {downloaded_tiles}/{total_tiles} tiles")
+        elapsed = time.time() - start_time
+        if failed_tiles:
+            print(f"Completed! {new_tiles} downloaded, {cached_tiles} cached, {failed_tiles} failed in {elapsed:.1f}s")
+        else:
+            print(f"Completed! {new_tiles} downloaded, {cached_tiles} cached in {elapsed:.1f}s")
         
         # Generate metadata
-        self.generate_metadata(north, south, east, west, min_zoom, max_zoom, source)
+        self.generate_metadata(north, south, east, west, min_zoom, max_zoom, source, region_name)
     
-    def generate_metadata(self, north, south, east, west, min_zoom, max_zoom, source):
-        """Generate metadata file for Meshtastic"""
-        metadata = {
-            "name": f"Generated tiles ({source})",
-            "description": f"Map tiles for Meshtastic T-Deck",
-            "bounds": [west, south, east, north],
-            "minzoom": min_zoom,
-            "maxzoom": max_zoom,
-            "format": "png",
-            "type": "baselayer",
-            "source": source,
-            "generated": time.strftime("%Y-%m-%d %H:%M:%S")
-        }
-        
+    def generate_metadata(self, north, south, east, west, min_zoom, max_zoom, source, region_name=None):
+        """Generate or update metadata file for Meshtastic"""
         metadata_path = self.output_dir / "metadata.json"
+        region_name = region_name or "Unknown region"
+
+        # Load existing or create new
+        if metadata_path.exists():
+            with open(metadata_path) as f:
+                metadata = json.load(f)
+            # Migrate old format if needed
+            if "regions" not in metadata:
+                old_region = {
+                    "name": metadata.get("name", "Unknown"),
+                    "bounds": metadata.get("bounds"),
+                    "zoom": [metadata.get("minzoom"), metadata.get("maxzoom")],
+                    "source": metadata.get("source", source),
+                    "generated": metadata.get("generated")
+                }
+                metadata = {"regions": [old_region], "format": "png"}
+        else:
+            metadata = {"regions": [], "format": "png"}
+
+        new_bounds = [west, south, east, north]
+        now = time.strftime("%Y-%m-%d %H:%M:%S")
+
+        # Find existing region with same name + source
+        existing = next(
+            (r for r in metadata["regions"]
+             if r["name"] == region_name and r.get("source") == source),
+            None
+        )
+
+        if existing:
+            # Expand zoom range
+            existing["zoom"] = [
+                min(existing["zoom"][0], min_zoom),
+                max(existing["zoom"][1], max_zoom)
+            ]
+            # Expand bounds (union): [west, south, east, north]
+            old = existing["bounds"]
+            existing["bounds"] = [
+                min(old[0], west),
+                min(old[1], south),
+                max(old[2], east),
+                max(old[3], north)
+            ]
+            existing["generated"] = now
+            print(f"Updated region '{region_name}' in metadata")
+        else:
+            metadata["regions"].append({
+                "name": region_name,
+                "bounds": new_bounds,
+                "zoom": [min_zoom, max_zoom],
+                "source": source,
+                "generated": now
+            })
+            print(f"Added region '{region_name}' to metadata")
+
+        # Update global zoom range
+        all_zooms = [z for r in metadata["regions"] for z in r["zoom"]]
+        metadata["minzoom"] = min(all_zooms)
+        metadata["maxzoom"] = max(all_zooms)
+
         with open(metadata_path, 'w') as f:
             json.dump(metadata, f, indent=2)
-        
+
         print(f"Metadata saved to: {metadata_path}")
     
     def create_sample_tile(self, text="Sample Tile"):
@@ -414,12 +496,12 @@ def main():
         
         print(f"Found {args.city}: {coord['lat']:.4f}, {coord['lon']:.4f}")
         
-        # Create bounding box around city
+        # Use city bounding box + buffer
         buffer_deg = args.buffer / 111.0  # Convert km to degrees
-        north = coord['lat'] + buffer_deg
-        south = coord['lat'] - buffer_deg
-        east = coord['lon'] + buffer_deg
-        west = coord['lon'] - buffer_deg
+        north = coord['north'] + buffer_deg
+        south = coord['south'] - buffer_deg
+        east = coord['east'] + buffer_deg
+        west = coord['west'] - buffer_deg
         area_name = args.city
         
     elif args.cities:
@@ -488,7 +570,8 @@ def main():
         min_zoom=args.min_zoom,
         max_zoom=args.max_zoom,
         source=args.source,
-        max_workers=args.max_workers
+        max_workers=args.max_workers,
+        region_name=area_name
     )
 
 if __name__ == "__main__":
