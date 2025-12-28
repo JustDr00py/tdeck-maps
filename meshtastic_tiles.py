@@ -521,7 +521,11 @@ def main():
         if not all([args.north, args.south, args.east, args.west]):
             print("Error: --coords requires --north, --south, --east, --west")
             return
-        north, south, east, west = args.north, args.south, args.east, args.west
+        buffer_deg = args.buffer / 111.0  # Convert km to degrees
+        north = args.north + buffer_deg
+        south = args.south - buffer_deg
+        east = args.east + buffer_deg
+        west = args.west - buffer_deg
         area_name = "custom area"
         
     # Validation
