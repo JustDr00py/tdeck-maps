@@ -6,13 +6,21 @@ Generates map tiles from various sources for offline use
 
 import math
 import time
+import argparse
+import json
+from enum import Enum
+from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
 import requests
 from PIL import Image, ImageDraw, ImageFont
 from tqdm import tqdm
-import argparse
-from pathlib import Path
-import json
-from concurrent.futures import ThreadPoolExecutor, as_completed
+
+
+class DownloadStatus(Enum):
+    DOWNLOADED = "downloaded"
+    CACHED = "cached"
+    FAILED = "failed"
 
 class CityLookup:
     def __init__(self):
@@ -160,7 +168,7 @@ class MeshtasticTileGenerator:
         
         # Skip if tile already exists
         if tile_path.exists():
-            return tile_path, "cached"
+            return tile_path, DownloadStatus.CACHED
         
         try:
             response = self.session.get(url, timeout=10)
@@ -171,11 +179,11 @@ class MeshtasticTileGenerator:
                 f.write(response.content)
             
             time.sleep(self.delay)  # Be respectful to tile servers
-            return tile_path, "downloaded"
+            return tile_path, DownloadStatus.DOWNLOADED
             
         except Exception as e:
             print(f"Error downloading tile {x},{y},{zoom}: {e}")
-            return None, "failed"
+            return None, DownloadStatus.FAILED
     
     def generate_tiles(self, north, south, east, west, min_zoom=8, max_zoom=16, source="osm", max_workers=4):
         """Generate tiles for a bounding box"""
@@ -248,11 +256,11 @@ class MeshtasticTileGenerator:
                 for future in as_completed(futures):
                     try:
                         tile_path, status = future.result()
-                        if status == "downloaded":
+                        if status == DownloadStatus.DOWNLOADED:
                             new_tiles += 1
-                        elif status == "cached":
+                        elif status == DownloadStatus.CACHED:
                             cached_tiles += 1
-                        elif status == "failed":
+                        elif status == DownloadStatus.FAILED:
                             failed_tiles += 1
                     except Exception:
                         failed_tiles += 1
