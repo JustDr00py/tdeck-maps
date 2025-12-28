@@ -56,10 +56,15 @@ class CityLookup:
                 return None
             
             result = data[0]
+            bbox = result['boundingbox']
             return {
                 'name': result.get('display_name', 'Unknown'),
                 'lat': float(result['lat']),
                 'lon': float(result['lon']),
+                'north': float(bbox[1]),
+                'south': float(bbox[0]),
+                'east': float(bbox[3]),
+                'west': float(bbox[2]),
                 'type': result.get('type', 'unknown')
             }
             
@@ -91,17 +96,19 @@ class CityLookup:
             print("No valid coordinates found")
             return None
         
-        # Calculate bounding box
-        lats = [c['lat'] for c in all_coords]
-        lons = [c['lon'] for c in all_coords]
+        # Calculate bounding box from city boundaries
+        norths = [c['north'] for c in all_coords]
+        souths = [c['south'] for c in all_coords]
+        easts = [c['east'] for c in all_coords]
+        wests = [c['west'] for c in all_coords]
         
         # Convert km buffer to degrees (approximate)
         buffer_deg = buffer_km / 111.0  # ~111km per degree
         
-        north = max(lats) + buffer_deg
-        south = min(lats) - buffer_deg
-        east = max(lons) + buffer_deg
-        west = min(lons) - buffer_deg
+        north = max(norths) + buffer_deg
+        south = min(souths) - buffer_deg
+        east = max(easts) + buffer_deg
+        west = min(wests) - buffer_deg
         
         print(f"\n📦 Bounding box for {len(all_coords)} cities (±{buffer_km}km buffer):")
         print(f"   North: {north:.4f}")
@@ -185,7 +192,7 @@ class MeshtasticTileGenerator:
             print(f"Error downloading tile {x},{y},{zoom}: {e}")
             return None, DownloadStatus.FAILED
     
-    def generate_tiles(self, north, south, east, west, min_zoom=8, max_zoom=16, source="osm", max_workers=4):
+    def generate_tiles(self, north, south, east, west, min_zoom=8, max_zoom=16, source="osm", max_workers=4, region_name=None):
         """Generate tiles for a bounding box"""
         print(f"Generating tiles for bounds: N:{north}, S:{south}, E:{east}, W:{west}")
         print(f"Zoom levels: {min_zoom} to {max_zoom}")
@@ -274,26 +281,74 @@ class MeshtasticTileGenerator:
             print(f"Completed! {new_tiles} downloaded, {cached_tiles} cached in {elapsed:.1f}s")
         
         # Generate metadata
-        self.generate_metadata(north, south, east, west, min_zoom, max_zoom, source)
+        self.generate_metadata(north, south, east, west, min_zoom, max_zoom, source, region_name)
     
-    def generate_metadata(self, north, south, east, west, min_zoom, max_zoom, source):
-        """Generate metadata file for Meshtastic"""
-        metadata = {
-            "name": f"Generated tiles ({source})",
-            "description": "Map tiles for Meshtastic T-Deck",
-            "bounds": [west, south, east, north],
-            "minzoom": min_zoom,
-            "maxzoom": max_zoom,
-            "format": "png",
-            "type": "baselayer",
-            "source": source,
-            "generated": time.strftime("%Y-%m-%d %H:%M:%S")
-        }
-        
+    def generate_metadata(self, north, south, east, west, min_zoom, max_zoom, source, region_name=None):
+        """Generate or update metadata file for Meshtastic"""
         metadata_path = self.output_dir / "metadata.json"
+        region_name = region_name or "Unknown region"
+
+        # Load existing or create new
+        if metadata_path.exists():
+            with open(metadata_path) as f:
+                metadata = json.load(f)
+            # Migrate old format if needed
+            if "regions" not in metadata:
+                old_region = {
+                    "name": metadata.get("name", "Unknown"),
+                    "bounds": metadata.get("bounds"),
+                    "zoom": [metadata.get("minzoom"), metadata.get("maxzoom")],
+                    "source": metadata.get("source", source),
+                    "generated": metadata.get("generated")
+                }
+                metadata = {"regions": [old_region], "format": "png"}
+        else:
+            metadata = {"regions": [], "format": "png"}
+
+        new_bounds = [west, south, east, north]
+        now = time.strftime("%Y-%m-%d %H:%M:%S")
+
+        # Find existing region with same name + source
+        existing = next(
+            (r for r in metadata["regions"]
+             if r["name"] == region_name and r.get("source") == source),
+            None
+        )
+
+        if existing:
+            # Expand zoom range
+            existing["zoom"] = [
+                min(existing["zoom"][0], min_zoom),
+                max(existing["zoom"][1], max_zoom)
+            ]
+            # Expand bounds (union): [west, south, east, north]
+            old = existing["bounds"]
+            existing["bounds"] = [
+                min(old[0], west),
+                min(old[1], south),
+                max(old[2], east),
+                max(old[3], north)
+            ]
+            existing["generated"] = now
+            print(f"Updated region '{region_name}' in metadata")
+        else:
+            metadata["regions"].append({
+                "name": region_name,
+                "bounds": new_bounds,
+                "zoom": [min_zoom, max_zoom],
+                "source": source,
+                "generated": now
+            })
+            print(f"Added region '{region_name}' to metadata")
+
+        # Update global zoom range
+        all_zooms = [z for r in metadata["regions"] for z in r["zoom"]]
+        metadata["minzoom"] = min(all_zooms)
+        metadata["maxzoom"] = max(all_zooms)
+
         with open(metadata_path, 'w') as f:
             json.dump(metadata, f, indent=2)
-        
+
         print(f"Metadata saved to: {metadata_path}")
     
     def create_sample_tile(self, text="Sample Tile"):
@@ -437,12 +492,12 @@ def main():
         
         print(f"Found {args.city}: {coord['lat']:.4f}, {coord['lon']:.4f}")
         
-        # Create bounding box around city
+        # Use city bounding box + buffer
         buffer_deg = args.buffer / 111.0  # Convert km to degrees
-        north = coord['lat'] + buffer_deg
-        south = coord['lat'] - buffer_deg
-        east = coord['lon'] + buffer_deg
-        west = coord['lon'] - buffer_deg
+        north = coord['north'] + buffer_deg
+        south = coord['south'] - buffer_deg
+        east = coord['east'] + buffer_deg
+        west = coord['west'] - buffer_deg
         area_name = args.city
         
     elif args.cities:
@@ -511,7 +566,8 @@ def main():
         min_zoom=args.min_zoom,
         max_zoom=args.max_zoom,
         source=args.source,
-        max_workers=args.max_workers
+        max_workers=args.max_workers,
+        region_name=area_name
     )
 
 if __name__ == "__main__":
