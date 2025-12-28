@@ -258,8 +258,8 @@ class MeshtasticTileGenerator:
                         future = executor.submit(self.download_tile, x, y, zoom, source)
                         futures.append(future)
             
-            # Process completed downloads
-            with tqdm(total=total_tiles, desc="Downloading", unit="tile") as pbar:
+            # Process completed downloads (smoothing=0 uses average rate over entire run)
+            with tqdm(total=total_tiles, desc="Downloading", unit="tile", smoothing=0) as pbar:
                 for future in as_completed(futures):
                     try:
                         tile_path, status = future.result()
