@@ -196,6 +196,7 @@ class MeshtasticTileGenerator:
         total_tiles = 0
         new_tiles = 0
         cached_tiles = 0
+        failed_tiles = 0
         
         # Calculate total tiles for progress tracking
         for zoom in range(min_zoom, max_zoom + 1):
@@ -243,23 +244,26 @@ class MeshtasticTileGenerator:
                         futures.append(future)
             
             # Process completed downloads
-            with tqdm(total=total_tiles, desc="Downloading", unit="tile") as pbar:
+            with tqdm(total=total_tiles, desc="Processing", unit="tile") as pbar:
                 for future in as_completed(futures):
                     try:
                         tile_path, status = future.result()
                         if status == "downloaded":
                             new_tiles += 1
-                            pbar.update(1)
                         elif status == "cached":
                             cached_tiles += 1
-                            pbar.total -= 1
-                            pbar.refresh()
+                        elif status == "failed":
+                            failed_tiles += 1
                     except Exception:
-                        pbar.total -= 1
-                        pbar.refresh()
+                        failed_tiles += 1
+                    pbar.update(1)
+                    pbar.set_postfix_str(f"new: {new_tiles}, cached: {cached_tiles}")
         
         elapsed = time.time() - start_time
-        print(f"Completed! {new_tiles} downloaded, {cached_tiles} cached in {elapsed:.1f}s")
+        if failed_tiles:
+            print(f"Completed! {new_tiles} downloaded, {cached_tiles} cached, {failed_tiles} failed in {elapsed:.1f}s")
+        else:
+            print(f"Completed! {new_tiles} downloaded, {cached_tiles} cached in {elapsed:.1f}s")
         
         # Generate metadata
         self.generate_metadata(north, south, east, west, min_zoom, max_zoom, source)
