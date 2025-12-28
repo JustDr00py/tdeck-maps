@@ -4,12 +4,11 @@ Meshtastic Map Tile Generator for T-Deck
 Generates map tiles from various sources for offline use
 """
 
-import os
-import sys
 import math
 import time
 import requests
 from PIL import Image, ImageDraw, ImageFont
+from tqdm import tqdm
 import argparse
 from pathlib import Path
 import json
@@ -161,7 +160,7 @@ class MeshtasticTileGenerator:
         
         # Skip if tile already exists
         if tile_path.exists():
-            return tile_path, True
+            return tile_path, "cached"
         
         try:
             response = self.session.get(url, timeout=10)
@@ -172,17 +171,19 @@ class MeshtasticTileGenerator:
                 f.write(response.content)
             
             time.sleep(self.delay)  # Be respectful to tile servers
-            return tile_path, True
+            return tile_path, "downloaded"
             
         except Exception as e:
             print(f"Error downloading tile {x},{y},{zoom}: {e}")
-            return None, False
+            return None, "failed"
     
     def generate_tiles(self, north, south, east, west, min_zoom=8, max_zoom=16, source="osm", max_workers=4):
         """Generate tiles for a bounding box"""
         print(f"Generating tiles for bounds: N:{north}, S:{south}, E:{east}, W:{west}")
         print(f"Zoom levels: {min_zoom} to {max_zoom}")
         print(f"Source: {source}")
+        print(f"Output: {self.output_dir}")
+        print(f"Workers: {max_workers}, Delay: {self.delay}s")
         
         # Validate coordinates
         if north <= south:
@@ -193,7 +194,8 @@ class MeshtasticTileGenerator:
             return
         
         total_tiles = 0
-        downloaded_tiles = 0
+        new_tiles = 0
+        cached_tiles = 0
         
         # Calculate total tiles for progress tracking
         for zoom in range(min_zoom, max_zoom + 1):
@@ -218,6 +220,7 @@ class MeshtasticTileGenerator:
             return
         
         # Download tiles with threading
+        start_time = time.time()
         with ThreadPoolExecutor(max_workers=max_workers) as executor:
             futures = []
             
@@ -240,15 +243,23 @@ class MeshtasticTileGenerator:
                         futures.append(future)
             
             # Process completed downloads
-            for future in as_completed(futures):
-                tile_path, success = future.result()
-                if success:
-                    downloaded_tiles += 1
-                
-                if downloaded_tiles % 100 == 0:
-                    print(f"Downloaded {downloaded_tiles}/{total_tiles} tiles")
+            with tqdm(total=total_tiles, desc="Downloading", unit="tile") as pbar:
+                for future in as_completed(futures):
+                    try:
+                        tile_path, status = future.result()
+                        if status == "downloaded":
+                            new_tiles += 1
+                            pbar.update(1)
+                        elif status == "cached":
+                            cached_tiles += 1
+                            pbar.total -= 1
+                            pbar.refresh()
+                    except Exception:
+                        pbar.total -= 1
+                        pbar.refresh()
         
-        print(f"Completed! Downloaded {downloaded_tiles}/{total_tiles} tiles")
+        elapsed = time.time() - start_time
+        print(f"Completed! {new_tiles} downloaded, {cached_tiles} cached in {elapsed:.1f}s")
         
         # Generate metadata
         self.generate_metadata(north, south, east, west, min_zoom, max_zoom, source)
@@ -257,7 +268,7 @@ class MeshtasticTileGenerator:
         """Generate metadata file for Meshtastic"""
         metadata = {
             "name": f"Generated tiles ({source})",
-            "description": f"Map tiles for Meshtastic T-Deck",
+            "description": "Map tiles for Meshtastic T-Deck",
             "bounds": [west, south, east, north],
             "minzoom": min_zoom,
             "maxzoom": max_zoom,
