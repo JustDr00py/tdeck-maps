@@ -9,19 +9,27 @@ Generate offline map tiles for your Meshtastic T-Deck device! This tool download
 pip install pillow requests
 ```
 
-2. **Get a free MapTiler API key** at https://maptiler.com/ and export it:
+2. **Get a free MapTiler API key** at https://maptiler.com/ and export the required environment variables:
 ```bash
 export MAPTILER_KEY=your_key_here
+# Required — sent in the HTTP User-Agent so tile providers can contact you
+export TDECK_MAPS_CONTACT="you@example.com"
+# Required — sent as HTTP Referer (any URL or project identifier works)
+export TDECK_MAPS_REFERER="https://github.com/you/tdeck-maps"
 ```
+
+Both `TDECK_MAPS_CONTACT` and `TDECK_MAPS_REFERER` must be set — every tile
+provider policy (MapTiler, OSM, Nominatim) requires an identifiable User-Agent
+with a way to reach you. `--contact` on the CLI overrides `TDECK_MAPS_CONTACT`.
 
 3. **Generate tiles for your city:**
 ```bash
 python meshtastic_tiles.py --city "San Francisco" --min-zoom 8 --max-zoom 12
 ```
 
-3. **Copy the `tiles` folder to your T-Deck's SD card**
+4. **Copy the `tiles` folder to your T-Deck's SD card**
 
-4. **Configure Meshtastic to use offline tiles**
+5. **Configure Meshtastic to use offline tiles**
 
 ## 📋 Features
 
@@ -154,8 +162,9 @@ python meshtastic_tiles.py --city "Denver" --source osm-direct --i-understand-os
 
 The OSM tile policy forbids bulk downloading from `tile.openstreetmap.org`. Previous versions of this
 script violated that policy and eventually got `403 Access Blocked`. Using MapTiler (or any other tile
-provider that permits offline caching) is the correct fix. The User-Agent header now also carries a
-contact address (`--contact`, defaults to the maintainer's email) as every major provider requires.
+provider that permits offline caching) is the correct fix. Every request also carries an identifying
+`User-Agent` (contact email from `TDECK_MAPS_CONTACT` or `--contact`) and `Referer` (from
+`TDECK_MAPS_REFERER`), as every major provider requires.
 
 ## 🔍 Zoom Levels Guide
 
