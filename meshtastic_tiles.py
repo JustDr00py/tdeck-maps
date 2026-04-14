@@ -15,8 +15,8 @@ from pathlib import Path
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-DEFAULT_CONTACT = 'ekarwatowski@gmail.com'
-REFERER = 'https://github.com/ekarwatowski/tdeck-maps'
+DEFAULT_CONTACT = os.environ.get('TDECK_MAPS_CONTACT')
+REFERER = os.environ.get('TDECK_MAPS_REFERER')
 OSM_POLICY_URL = 'https://operations.osmfoundation.org/policies/tiles/'
 
 
