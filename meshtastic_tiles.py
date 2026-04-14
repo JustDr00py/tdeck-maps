@@ -15,11 +15,25 @@ from pathlib import Path
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+DEFAULT_CONTACT = os.environ.get('TDECK_MAPS_CONTACT')
+REFERER = os.environ.get('TDECK_MAPS_REFERER')
+OSM_POLICY_URL = 'https://operations.osmfoundation.org/policies/tiles/'
+
+
+def build_user_agent(contact):
+    return f'tdeck-maps/1.0 ({contact})'
+
+
+class PolicyBlockedError(Exception):
+    """Raised when the remote tile server blocks us for policy violations."""
+
+
 class CityLookup:
-    def __init__(self):
+    def __init__(self, contact=DEFAULT_CONTACT):
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'MeshtasticTileGenerator/1.0'
+            'User-Agent': build_user_agent(contact),
+            'Referer': REFERER,
         })
     
     def get_coordinates(self, city, state=None, country=None):
@@ -111,13 +125,17 @@ class CityLookup:
         }
 
 class MeshtasticTileGenerator:
-    def __init__(self, output_dir="tiles", tile_size=256, delay=0.1):
+    def __init__(self, output_dir="tiles", tile_size=256, delay=0.5,
+                 contact=DEFAULT_CONTACT, maptiler_key=None):
         self.output_dir = Path(output_dir)
         self.tile_size = tile_size
         self.delay = delay  # Delay between requests to be respectful
+        self.maptiler_key = maptiler_key
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'MeshtasticTileGenerator/1.0'
+            'User-Agent': build_user_agent(contact),
+            'Referer': REFERER,
+            'Accept': 'image/png,image/jpeg,image/*;q=0.8',
         })
         
         # Create output directory
@@ -141,42 +159,73 @@ class MeshtasticTileGenerator:
     
     def get_tile_url(self, x, y, zoom, source="osm"):
         """Get tile URL for different map sources"""
+        key = self.maptiler_key or ''
         sources = {
-            "osm": f"https://tile.openstreetmap.org/{zoom}/{x}/{y}.png",
-            "satellite": f"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{zoom}/{y}/{x}",
-            "terrain": f"https://tile.opentopomap.org/{zoom}/{x}/{y}.png",
-            "cycle": f"https://tile.thunderforest.com/cycle/{zoom}/{x}/{y}.png"
+            "osm":        f"https://api.maptiler.com/maps/openstreetmap/{zoom}/{x}/{y}.png?key={key}",
+            "satellite":  f"https://api.maptiler.com/tiles/satellite-v2/{zoom}/{x}/{y}.jpg?key={key}",
+            "terrain":    f"https://api.maptiler.com/maps/topo-v2/{zoom}/{x}/{y}.png?key={key}",
+            "osm-direct": f"https://tile.openstreetmap.org/{zoom}/{x}/{y}.png",
         }
         return sources.get(source, sources["osm"])
-    
+
+    def _tile_extension(self, source):
+        return 'jpg' if source == 'satellite' else 'png'
+
     def download_tile(self, x, y, zoom, source="osm"):
-        """Download a single tile"""
+        """Download a single tile with policy-compliant retries."""
         url = self.get_tile_url(x, y, zoom, source)
-        
-        # Create directory structure
+
         tile_dir = self.output_dir / str(zoom) / str(x)
         tile_dir.mkdir(parents=True, exist_ok=True)
-        
-        tile_path = tile_dir / f"{y}.png"
-        
-        # Skip if tile already exists
+        tile_path = tile_dir / f"{y}.{self._tile_extension(source)}"
+
         if tile_path.exists():
             return tile_path, True
-        
-        try:
-            response = self.session.get(url, timeout=10)
-            response.raise_for_status()
-            
-            # Save the tile
-            with open(tile_path, 'wb') as f:
-                f.write(response.content)
-            
-            time.sleep(self.delay)  # Be respectful to tile servers
-            return tile_path, True
-            
-        except Exception as e:
-            print(f"Error downloading tile {x},{y},{zoom}: {e}")
+
+        max_retries = 5
+        backoff = 1.0
+        for attempt in range(max_retries):
+            try:
+                response = self.session.get(url, timeout=15)
+            except requests.RequestException as e:
+                print(f"Network error {x},{y},{zoom} (attempt {attempt+1}): {e}")
+                time.sleep(min(backoff, 60))
+                backoff *= 2
+                continue
+
+            status = response.status_code
+            if status == 200:
+                ctype = response.headers.get('Content-Type', '')
+                if not ctype.startswith('image/'):
+                    print(f"Non-image response for {x},{y},{zoom} (Content-Type={ctype}); skipping")
+                    return None, False
+                with open(tile_path, 'wb') as f:
+                    f.write(response.content)
+                time.sleep(self.delay)
+                return tile_path, True
+
+            if status in (429, 403, 503):
+                retry_after = response.headers.get('Retry-After')
+                try:
+                    wait = float(retry_after) if retry_after else backoff
+                except ValueError:
+                    wait = backoff
+                wait = min(wait, 60)
+                print(f"HTTP {status} for {x},{y},{zoom}; backing off {wait:.1f}s (attempt {attempt+1}/{max_retries})")
+                if status == 403 and source == 'osm-direct':
+                    raise PolicyBlockedError(
+                        f"tile.openstreetmap.org returned 403 — bulk downloads are prohibited. "
+                        f"See {OSM_POLICY_URL}"
+                    )
+                time.sleep(wait)
+                backoff *= 2
+                continue
+
+            print(f"HTTP {status} for {x},{y},{zoom}; giving up")
             return None, False
+
+        print(f"Exceeded retries for {x},{y},{zoom}")
+        return None, False
     
     def generate_tiles(self, north, south, east, west, min_zoom=8, max_zoom=16, source="osm", max_workers=4):
         """Generate tiles for a bounding box"""
@@ -240,13 +289,19 @@ class MeshtasticTileGenerator:
                         futures.append(future)
             
             # Process completed downloads
-            for future in as_completed(futures):
-                tile_path, success = future.result()
-                if success:
-                    downloaded_tiles += 1
-                
-                if downloaded_tiles % 100 == 0:
-                    print(f"Downloaded {downloaded_tiles}/{total_tiles} tiles")
+            try:
+                for future in as_completed(futures):
+                    tile_path, success = future.result()
+                    if success:
+                        downloaded_tiles += 1
+
+                    if downloaded_tiles % 100 == 0:
+                        print(f"Downloaded {downloaded_tiles}/{total_tiles} tiles")
+            except PolicyBlockedError as e:
+                print(f"\n❌ Aborting: {e}")
+                for f in futures:
+                    f.cancel()
+                return
         
         print(f"Completed! Downloaded {downloaded_tiles}/{total_tiles} tiles")
         
@@ -261,7 +316,7 @@ class MeshtasticTileGenerator:
             "bounds": [west, south, east, north],
             "minzoom": min_zoom,
             "maxzoom": max_zoom,
-            "format": "png",
+            "format": "jpg" if source == 'satellite' else "png",
             "type": "baselayer",
             "source": source,
             "generated": time.strftime("%Y-%m-%d %H:%M:%S")
@@ -372,19 +427,50 @@ def main():
     # Tile generation options
     parser.add_argument('--min-zoom', type=int, default=8, help='Minimum zoom level')
     parser.add_argument('--max-zoom', type=int, default=12, help='Maximum zoom level')
-    parser.add_argument('--source', default='osm', choices=['osm', 'satellite', 'terrain', 'cycle'],
-                        help='Map source')
+    parser.add_argument('--source', default='osm',
+                        choices=['osm', 'satellite', 'terrain', 'osm-direct'],
+                        help='Map source. "osm"/"satellite"/"terrain" use MapTiler (requires key). '
+                             '"osm-direct" hits tile.openstreetmap.org and is policy-restricted.')
+    parser.add_argument('--maptiler-key', default=os.environ.get('MAPTILER_KEY'),
+                        help='MapTiler API key (or set MAPTILER_KEY env var)')
+    parser.add_argument('--contact', default=DEFAULT_CONTACT,
+                        help='Contact email/URL embedded in User-Agent (tile provider policy)')
+    parser.add_argument('--i-understand-osm-policy', action='store_true',
+                        help='Required when using --source osm-direct. See ' + OSM_POLICY_URL)
     parser.add_argument('--output-dir', default='tiles', help='Output directory')
-    parser.add_argument('--delay', type=float, default=0.2, help='Delay between requests (seconds)')
-    parser.add_argument('--max-workers', type=int, default=3, help='Maximum concurrent downloads')
+    parser.add_argument('--delay', type=float, default=0.5, help='Delay between requests (seconds)')
+    parser.add_argument('--max-workers', type=int, default=2, help='Maximum concurrent downloads')
     parser.add_argument('--sample-only', action='store_true', help='Generate sample tile only')
     
     args = parser.parse_args()
-    
+
+    maptiler_sources = {'osm', 'satellite', 'terrain'}
+    if args.source in maptiler_sources and not args.maptiler_key:
+        print(f"Error: --source {args.source} uses MapTiler and requires an API key.")
+        print("Set MAPTILER_KEY env var or pass --maptiler-key. Get a free key at https://maptiler.com/")
+        return
+
+    if args.source == 'osm-direct':
+        print("⚠️  WARNING: --source osm-direct hits tile.openstreetmap.org directly.")
+        print(f"   OSM's tile policy prohibits bulk downloads: {OSM_POLICY_URL}")
+        print("   Expect 403 blocks. Consider --source osm (MapTiler) instead.")
+        if not args.i_understand_osm_policy:
+            print("   Re-run with --i-understand-osm-policy to proceed anyway.")
+            return
+        # Enforce OSM policy caps regardless of user flags.
+        if args.max_workers > 2:
+            print("   Capping --max-workers at 2 for osm-direct.")
+            args.max_workers = 2
+        if args.delay < 1.0:
+            print("   Raising --delay to 1.0 for osm-direct.")
+            args.delay = 1.0
+
     # Create generator
     generator = MeshtasticTileGenerator(
         output_dir=args.output_dir,
-        delay=args.delay
+        delay=args.delay,
+        contact=args.contact,
+        maptiler_key=args.maptiler_key,
     )
     
     if args.sample_only:
@@ -406,7 +492,7 @@ def main():
         
     elif args.city:
         # Single city lookup
-        lookup = CityLookup()
+        lookup = CityLookup(contact=args.contact)
         coord = lookup.get_coordinates(args.city)
         if not coord:
             print(f"Could not find coordinates for: {args.city}")
@@ -424,7 +510,7 @@ def main():
         
     elif args.cities:
         # Multiple cities lookup
-        lookup = CityLookup()
+        lookup = CityLookup(contact=args.contact)
         cities = [city.strip() for city in args.cities.split(';')]
         bbox = lookup.get_bounding_box_for_cities(cities, args.buffer)
         if not bbox:

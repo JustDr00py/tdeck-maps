@@ -9,14 +9,27 @@ Generate offline map tiles for your Meshtastic T-Deck device! This tool download
 pip install pillow requests
 ```
 
-2. **Generate tiles for your city:**
+2. **Get a free MapTiler API key** at https://maptiler.com/ and export the required environment variables:
+```bash
+export MAPTILER_KEY=your_key_here
+# Required — sent in the HTTP User-Agent so tile providers can contact you
+export TDECK_MAPS_CONTACT="you@example.com"
+# Required — sent as HTTP Referer (any URL or project identifier works)
+export TDECK_MAPS_REFERER="https://github.com/you/tdeck-maps"
+```
+
+Both `TDECK_MAPS_CONTACT` and `TDECK_MAPS_REFERER` must be set — every tile
+provider policy (MapTiler, OSM, Nominatim) requires an identifiable User-Agent
+with a way to reach you. `--contact` on the CLI overrides `TDECK_MAPS_CONTACT`.
+
+3. **Generate tiles for your city:**
 ```bash
 python meshtastic_tiles.py --city "San Francisco" --min-zoom 8 --max-zoom 12
 ```
 
-3. **Copy the `tiles` folder to your T-Deck's SD card**
+4. **Copy the `tiles` folder to your T-Deck's SD card**
 
-4. **Configure Meshtastic to use offline tiles**
+5. **Configure Meshtastic to use offline tiles**
 
 ## 📋 Features
 
@@ -122,10 +135,17 @@ python meshtastic_tiles.py --coords --north 40.8 --south 40.6 --east -74.0 --wes
 
 ## 🗺️ Map Sources
 
-Choose different map types with the `--source` option:
+All default sources go through **MapTiler** (free tier, requires an API key). OSM's own tile servers
+explicitly prohibit bulk downloads — see [OSM Tile Usage Policy](https://operations.osmfoundation.org/policies/tiles/) —
+so this tool no longer uses them by default. `osm-direct` is available as an opt-in and will likely get you
+`403 Blocked`.
+
+Pass the key via `--maptiler-key` or the `MAPTILER_KEY` env var.
 
 ```bash
-# Standard street map (default)
+export MAPTILER_KEY=your_key_here
+
+# Standard street map (default, via MapTiler)
 python meshtastic_tiles.py --city "Denver" --source osm
 
 # Satellite imagery
@@ -134,9 +154,17 @@ python meshtastic_tiles.py --city "Denver" --source satellite
 # Topographic/terrain
 python meshtastic_tiles.py --city "Denver" --source terrain
 
-# Cycling-focused
-python meshtastic_tiles.py --city "Denver" --source cycle
+# Raw OSM servers (policy-restricted — expect blocks):
+python meshtastic_tiles.py --city "Denver" --source osm-direct --i-understand-osm-policy
 ```
+
+### Why we require an API key now
+
+The OSM tile policy forbids bulk downloading from `tile.openstreetmap.org`. Previous versions of this
+script violated that policy and eventually got `403 Access Blocked`. Using MapTiler (or any other tile
+provider that permits offline caching) is the correct fix. Every request also carries an identifying
+`User-Agent` (contact email from `TDECK_MAPS_CONTACT` or `--contact`) and `Referer` (from
+`TDECK_MAPS_REFERER`), as every major provider requires.
 
 ## 🔍 Zoom Levels Guide
 

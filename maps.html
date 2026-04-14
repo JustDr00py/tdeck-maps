@@ -223,10 +223,12 @@
             <div id="map"></div>
             <div class="map-controls">
                 <select id="mapStyle">
-                    <option value="osm">OpenStreetMap</option>
+                    <option value="osm">OpenStreetMap (MapTiler)</option>
                     <option value="satellite">Satellite</option>
                     <option value="terrain">Terrain</option>
                 </select>
+                <input type="text" id="previewKey" placeholder="MapTiler key (for preview)" style="margin-top:4px;width:100%;">
+                <small style="color:#ccc;">Preview needs a MapTiler key. Get one at maptiler.com.</small>
             </div>
             <div class="selection-info hidden" id="selectionInfo">
                 <div>Click and drag to select area</div>
@@ -282,22 +284,30 @@
             <div class="control-group">
                 <h3>🗺️ Map Source</h3>
                 <select id="tileSource">
-                    <option value="osm">OpenStreetMap</option>
-                    <option value="satellite">Satellite</option>
-                    <option value="terrain">Terrain</option>
-                    <option value="cycle">Cycle</option>
+                    <option value="osm">OpenStreetMap (via MapTiler)</option>
+                    <option value="satellite">Satellite (via MapTiler)</option>
+                    <option value="terrain">Terrain (via MapTiler)</option>
+                    <option value="osm-direct">OSM direct — policy-restricted</option>
                 </select>
+                <div class="form-row" style="margin-top:0.5rem;">
+                    <label>MapTiler key:</label>
+                    <input type="text" id="maptilerKey" placeholder="required for MapTiler sources">
+                </div>
+                <div class="form-row">
+                    <label>Contact:</label>
+                    <input type="text" id="contact" value="ekarwatowski@gmail.com" placeholder="email or URL for User-Agent">
+                </div>
             </div>
             
             <div class="control-group">
                 <h3>⚙️ Advanced Options</h3>
                 <div class="form-row">
                     <label>Delay:</label>
-                    <input type="number" id="delay" value="0.2" step="0.1" min="0.1">
+                    <input type="number" id="delay" value="0.5" step="0.1" min="0.1">
                 </div>
                 <div class="form-row">
                     <label>Workers:</label>
-                    <input type="number" id="workers" value="3" min="1" max="10">
+                    <input type="number" id="workers" value="2" min="1" max="10">
                 </div>
                 <div class="form-row">
                     <label>Output:</label>
@@ -346,20 +356,24 @@ Select an area on the map to generate command...
         let startPoint = null;
         let currentTileLayer = null;
         
-        // Map tile layers
-        const tileLayers = {
-            osm: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-            satellite: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-            terrain: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png'
-        };
-        
+        // Map tile layers (preview-only; requires MapTiler key)
+        function tileUrl(style) {
+            const key = document.getElementById('previewKey')?.value || '';
+            const layers = {
+                osm:       `https://api.maptiler.com/maps/openstreetmap/{z}/{x}/{y}.png?key=${key}`,
+                satellite: `https://api.maptiler.com/tiles/satellite-v2/{z}/{x}/{y}.jpg?key=${key}`,
+                terrain:   `https://api.maptiler.com/maps/topo-v2/{z}/{x}/{y}.png?key=${key}`,
+            };
+            return layers[style] || layers.osm;
+        }
+
         // Initialize map
         function initMap() {
             map = L.map('map').setView([39.7392, -104.9903], 8); // Denver
-            
+
             // Add default tile layer
-            currentTileLayer = L.tileLayer(tileLayers.osm, {
-                attribution: '© OpenStreetMap contributors'
+            currentTileLayer = L.tileLayer(tileUrl('osm'), {
+                attribution: '© OpenStreetMap contributors · © MapTiler'
             }).addTo(map);
             
             // Add selection functionality
@@ -442,8 +456,8 @@ Select an area on the map to generate command...
                 map.removeLayer(currentTileLayer);
             }
             
-            currentTileLayer = L.tileLayer(tileLayers[style], {
-                attribution: style === 'osm' ? '© OpenStreetMap contributors' : '© Map tiles'
+            currentTileLayer = L.tileLayer(tileUrl(style), {
+                attribution: '© OpenStreetMap contributors · © MapTiler'
             }).addTo(map);
         }
         
@@ -507,13 +521,29 @@ Select an area on the map to generate command...
             const delay = document.getElementById('delay').value;
             const workers = document.getElementById('workers').value;
             const outputDir = document.getElementById('outputDir').value;
-            
+            const maptilerKey = document.getElementById('maptilerKey').value.trim();
+            const contact = document.getElementById('contact').value.trim();
+
             if (!north || !south || !east || !west) {
                 document.getElementById('commandOutput').textContent = 'Select an area on the map first...';
                 return;
             }
-            
-            const command = `python meshtastic_tiles.py --coords --north ${north} --south ${south} --east ${east} --west ${west} --min-zoom ${minZoom} --max-zoom ${maxZoom} --source ${source} --delay ${delay} --max-workers ${workers} --output-dir ${outputDir}`;
+
+            const parts = [
+                'python meshtastic_tiles.py --coords',
+                `--north ${north} --south ${south} --east ${east} --west ${west}`,
+                `--min-zoom ${minZoom} --max-zoom ${maxZoom}`,
+                `--source ${source}`,
+                `--delay ${delay} --max-workers ${workers}`,
+                `--output-dir ${outputDir}`,
+            ];
+            if (contact) parts.push(`--contact ${contact}`);
+            if (source !== 'osm-direct') {
+                parts.push(maptilerKey ? `--maptiler-key ${maptilerKey}` : '--maptiler-key "$MAPTILER_KEY"');
+            } else {
+                parts.push('--i-understand-osm-policy');
+            }
+            const command = parts.join(' ');
             
             document.getElementById('commandOutput').textContent = command;
         }
@@ -589,6 +619,9 @@ Select an area on the map to generate command...
         document.getElementById('delay').addEventListener('input', generateCommand);
         document.getElementById('workers').addEventListener('input', generateCommand);
         document.getElementById('outputDir').addEventListener('input', generateCommand);
+        document.getElementById('maptilerKey').addEventListener('input', generateCommand);
+        document.getElementById('contact').addEventListener('input', generateCommand);
+        document.getElementById('previewKey').addEventListener('change', changeMapStyle);
         
         // Manual coordinate input listeners
         ['north', 'south', 'east', 'west'].forEach(id => {
