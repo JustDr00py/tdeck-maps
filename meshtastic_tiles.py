@@ -316,7 +316,7 @@ class MeshtasticTileGenerator:
             "bounds": [west, south, east, north],
             "minzoom": min_zoom,
             "maxzoom": max_zoom,
-            "format": "png",
+            "format": "jpg" if source == 'satellite' else "png",
             "type": "baselayer",
             "source": source,
             "generated": time.strftime("%Y-%m-%d %H:%M:%S")
