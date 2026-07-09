@@ -8,6 +8,7 @@ import os
 import sys
 import math
 import time
+import threading
 import requests
 from PIL import Image, ImageDraw, ImageFont
 import argparse
@@ -15,12 +16,43 @@ from pathlib import Path
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+# Identifies this tool to tile/geocoding servers per their usage policies
+# (e.g. https://osmfoundation.org/wiki/Policies/tile_usage_policy), which ask
+# for a way to identify and contact the operator of automated traffic.
+USER_AGENT = 'tdeck-maps/1.1 (+https://github.com/JustDr00py/tdeck-maps)'
+
+
+class RateLimiter:
+    """Thread-safe limiter enforcing a minimum interval between events globally.
+
+    Used so that --max-workers doesn't multiply the effective request rate:
+    with a naive per-thread sleep, N workers each sleeping `delay` seconds
+    between their own requests produces a real rate of N/delay req/sec, which
+    is what triggers tile-server 429/403 responses under load.
+    """
+
+    def __init__(self, min_interval):
+        self.min_interval = min_interval
+        self._lock = threading.Lock()
+        self._next_time = 0.0
+
+    def wait(self):
+        with self._lock:
+            now = time.monotonic()
+            delay = self._next_time - now
+            if delay > 0:
+                time.sleep(delay)
+                now = time.monotonic()
+            self._next_time = now + self.min_interval
+
+
 class CityLookup:
     def __init__(self):
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'MeshtasticTileGenerator/1.0'
+            'User-Agent': USER_AGENT
         })
+        self.rate_limiter = RateLimiter(1.0)  # Nominatim: max ~1 request/sec
     
     def get_coordinates(self, city, state=None, country=None):
         """Get coordinates using OpenStreetMap Nominatim (free)"""
@@ -40,6 +72,7 @@ class CityLookup:
             'addressdetails': 1
         }
         
+        self.rate_limiter.wait()
         try:
             response = self.session.get(base_url, params=params, timeout=10)
             response.raise_for_status()
@@ -68,7 +101,7 @@ class CityLookup:
         all_coords = []
         
         print(f"Looking up coordinates for {len(cities)} cities...")
-        for i, city_info in enumerate(cities):
+        for city_info in cities:
             if isinstance(city_info, str):
                 city, state, country = city_info, None, None
             else:
@@ -76,15 +109,13 @@ class CityLookup:
                 state = city_info.get('state')
                 country = city_info.get('country')
 
+            # get_coordinates() rate-limits itself via self.rate_limiter
             result = self.get_coordinates(city, state, country)
             if result:
                 all_coords.append(result)
                 print(f"✓ {city}: {result['lat']:.4f}, {result['lon']:.4f}")
             else:
                 print(f"✗ {city}: Not found")
-
-            if i < len(cities) - 1:
-                time.sleep(1)  # Respect Nominatim's ~1 request/sec usage policy
         
         if not all_coords:
             print("No valid coordinates found")
@@ -120,13 +151,16 @@ class MeshtasticTileGenerator:
     def __init__(self, output_dir="tiles", tile_size=256, delay=0.1, api_key=None):
         self.output_dir = Path(output_dir)
         self.tile_size = tile_size
-        self.delay = delay  # Delay between requests to be respectful
+        self.delay = delay  # Minimum seconds between requests, enforced globally
         self.api_key = api_key
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'MeshtasticTileGenerator/1.0'
+            'User-Agent': USER_AGENT
         })
-        
+        # Shared across all worker threads so --max-workers can't multiply the
+        # effective request rate past what --delay says (see RateLimiter docstring).
+        self.rate_limiter = RateLimiter(delay)
+
         # Create output directory
         self.output_dir.mkdir(exist_ok=True)
         
@@ -159,34 +193,59 @@ class MeshtasticTileGenerator:
             url += f"?apikey={self.api_key}"
         return url
     
-    def download_tile(self, x, y, zoom, source="osm"):
-        """Download a single tile"""
+    def download_tile(self, x, y, zoom, source="osm", max_attempts=3):
+        """Download a single tile, retrying transient failures with backoff"""
         url = self.get_tile_url(x, y, zoom, source)
-        
+
         # Create directory structure
         tile_dir = self.output_dir / str(zoom) / str(x)
         tile_dir.mkdir(parents=True, exist_ok=True)
-        
+
         tile_path = tile_dir / f"{y}.png"
-        
+
         # Skip if tile already exists
         if tile_path.exists():
             return tile_path, True
-        
-        try:
-            response = self.session.get(url, timeout=10)
-            response.raise_for_status()
 
-            # Save the tile
-            with open(tile_path, 'wb') as f:
-                f.write(response.content)
+        for attempt in range(1, max_attempts + 1):
+            self.rate_limiter.wait()
+            try:
+                response = self.session.get(url, timeout=10)
+            except requests.exceptions.RequestException as e:
+                if attempt == max_attempts:
+                    print(f"Error downloading tile {x},{y},{zoom}: {e}")
+                    return None, False
+                time.sleep(2 ** attempt)
+                continue
 
-            time.sleep(self.delay)  # Be respectful to tile servers
-            return tile_path, True
+            if response.status_code == 403:
+                # Hard block, not transient - retrying just makes it worse.
+                print(
+                    f"Error downloading tile {x},{y},{zoom}: 403 Access Blocked. "
+                    f"{source} is rejecting this request, likely due to its tile usage "
+                    f"policy - try a lower --max-workers, a higher --delay, or a "
+                    f"different --source."
+                )
+                return None, False
 
-        except (requests.exceptions.RequestException, OSError) as e:
-            print(f"Error downloading tile {x},{y},{zoom}: {e}")
-            return None, False
+            if response.status_code == 429 or response.status_code >= 500:
+                if attempt == max_attempts:
+                    print(f"Error downloading tile {x},{y},{zoom}: {response.status_code} after {max_attempts} attempts")
+                    return None, False
+                retry_after = response.headers.get('Retry-After')
+                time.sleep(float(retry_after) if retry_after else 2 ** attempt)
+                continue
+
+            try:
+                response.raise_for_status()
+                with open(tile_path, 'wb') as f:
+                    f.write(response.content)
+                return tile_path, True
+            except (requests.exceptions.RequestException, OSError) as e:
+                print(f"Error downloading tile {x},{y},{zoom}: {e}")
+                return None, False
+
+        return None, False
     
     def generate_tiles(self, north, south, east, west, min_zoom=8, max_zoom=16, source="osm", max_workers=4):
         """Generate tiles for a bounding box"""

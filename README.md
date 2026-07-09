@@ -234,6 +234,36 @@ python meshtastic_tiles.py --sample-only
 - California zoom 6-10: ~2-5 GB
 - USA zoom 4-8: ~500 MB - 2 GB
 
+## 🚦 Tile Server Limits & Etiquette
+
+`tile.openstreetmap.org` is a volunteer-run, donation-funded service, and its
+[tile usage policy](https://osmfoundation.org/wiki/Policies/tile_usage_policy)
+explicitly restricts **bulk downloading** - which is exactly what this tool
+does. To stay as respectful as possible of shared infrastructure, the script:
+
+- Sends a descriptive `User-Agent` identifying the tool and a contact URL
+- Enforces a **global** rate limit (`--delay` seconds between requests, no
+  matter how many `--max-workers` you use - more workers no longer means a
+  faster *combined* request rate)
+- Retries transient failures (timeouts, `429`, `5xx`) a few times with
+  backoff, but treats `403 Access Blocked` as a hard stop rather than
+  hammering the server further
+
+None of that makes large bulk downloads compliant with OSM's policy, though -
+it just reduces the odds of tripping their abuse detection for moderate use
+(a handful of cities). If you're generating tiles regularly, for many
+cities/regions, or for a team, please don't rely on the public OSM tile
+server. Better options:
+
+- **Run your own tile server** from an OSM extract (see
+  [switch2osm.org](https://switch2osm.org/serving-tiles/)) and point
+  `get_tile_url()` at it
+- **Use a paid provider** that explicitly permits bulk/offline export (e.g.
+  Thunderforest with `--api-key`, MapTiler, Stadia Maps)
+- **Use a source built for offline extracts**, like
+  [Protomaps](https://protomaps.com), instead of fetching individual tile
+  URLs
+
 ## 🔧 T-Deck Integration
 
 1. **Generate tiles** using this script
@@ -263,6 +293,13 @@ python meshtastic_tiles.py --sample-only
 - Reduce `--max-workers` to 2-3
 - Increase `--delay` to 0.3-0.5
 - Check if your ISP is throttling requests
+
+**"403 Access Blocked" errors:**
+- You've tripped the tile server's usage policy - see
+  [Tile Server Limits & Etiquette](#-tile-server-limits--etiquette)
+- Lower `--max-workers` (try 1-2) and raise `--delay` (try 0.5+), then retry
+- If it persists, switch `--source` or use your own/paid tile source instead
+  of the public OSM server
 
 **Out of storage:**
 - Reduce zoom range (try 8-11 instead of 8-14)
