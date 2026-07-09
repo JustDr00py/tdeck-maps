@@ -221,15 +221,8 @@
     <div class="main-container">
         <div class="map-container">
             <div id="map"></div>
-            <div class="map-controls">
-                <select id="mapStyle">
-                    <option value="osm">OpenStreetMap</option>
-                    <option value="satellite">Satellite</option>
-                    <option value="terrain">Terrain</option>
-                </select>
-            </div>
             <div class="selection-info hidden" id="selectionInfo">
-                <div>Click and drag to select area</div>
+                <div>Selecting area&hellip;</div>
                 <div id="boundsDisplay"></div>
             </div>
         </div>
@@ -237,7 +230,7 @@
         <div class="controls">
             <div class="instructions">
                 <strong>How to use:</strong><br>
-                1. Click and drag on the map to select an area<br>
+                1. Drag to pan/zoom the map, or hold <strong>Shift</strong> and drag to select an area<br>
                 2. Choose your zoom levels and map source<br>
                 3. Copy the generated command and run it
             </div>
@@ -346,42 +339,43 @@ Select an area on the map to generate command...
         let startPoint = null;
         let currentTileLayer = null;
         
-        // Map tile layers
+        // Map tile layers (mirrors the --source choices in meshtastic_tiles.py).
+        // Note: cycle requires a Thunderforest API key, same as the CLI's --api-key -
+        // without one this preview layer will show broken/blank tiles.
         const tileLayers = {
             osm: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
             satellite: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-            terrain: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png'
+            terrain: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+            cycle: 'https://{s}.tile.thunderforest.com/cycle/{z}/{x}/{y}.png'
         };
-        
+
         // Initialize map
         function initMap() {
             map = L.map('map').setView([39.7392, -104.9903], 8); // Denver
-            
+
             // Add default tile layer
             currentTileLayer = L.tileLayer(tileLayers.osm, {
                 attribution: '© OpenStreetMap contributors'
             }).addTo(map);
-            
-            // Add selection functionality
+
+            // Add selection functionality (Shift+drag selects, normal drag pans)
             map.on('mousedown', onMouseDown);
             map.on('mousemove', onMouseMove);
             map.on('mouseup', onMouseUp);
-            
-            // Prevent default selection behavior
-            map.dragging.disable();
-            map.on('mousedown', function() { map.dragging.disable(); });
-            map.on('mouseup', function() { map.dragging.enable(); });
         }
-        
+
         // Mouse event handlers for area selection
         function onMouseDown(e) {
+            if (!e.originalEvent.shiftKey) return;
+
             isSelecting = true;
             startPoint = e.latlng;
-            
+            map.dragging.disable();
+
             if (selectionRectangle) {
                 map.removeLayer(selectionRectangle);
             }
-            
+
             document.getElementById('selectionInfo').classList.remove('hidden');
         }
         
@@ -406,10 +400,11 @@ Select an area on the map to generate command...
         
         function onMouseUp(e) {
             if (!isSelecting || !startPoint) return;
-            
+
             isSelecting = false;
+            map.dragging.enable();
             const bounds = L.latLngBounds(startPoint, e.latlng);
-            
+
             // Update form fields
             document.getElementById('north').value = bounds.getNorth().toFixed(6);
             document.getElementById('south').value = bounds.getSouth().toFixed(6);
@@ -434,14 +429,14 @@ Select an area on the map to generate command...
             `;
         }
         
-        // Change map style
+        // Change map preview to match the selected tile source
         function changeMapStyle() {
-            const style = document.getElementById('mapStyle').value;
-            
+            const style = document.getElementById('tileSource').value;
+
             if (currentTileLayer) {
                 map.removeLayer(currentTileLayer);
             }
-            
+
             currentTileLayer = L.tileLayer(tileLayers[style], {
                 attribution: style === 'osm' ? '© OpenStreetMap contributors' : '© Map tiles'
             }).addTo(map);
@@ -520,14 +515,35 @@ Select an area on the map to generate command...
         
         function copyCommand() {
             const command = document.getElementById('commandOutput').textContent;
-            navigator.clipboard.writeText(command).then(() => {
-                const button = document.querySelector('button[onclick="copyCommand()"]');
+            const button = document.querySelector('button[onclick="copyCommand()"]');
+
+            const showCopied = () => {
                 const originalText = button.textContent;
                 button.textContent = '✅ Copied!';
                 setTimeout(() => {
                     button.textContent = originalText;
                 }, 2000);
-            });
+            };
+
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(command).then(showCopied);
+                return;
+            }
+
+            // Fallback for contexts where the Clipboard API is unavailable
+            // (e.g. some browsers when this page is opened via file://)
+            const textarea = document.createElement('textarea');
+            textarea.value = command;
+            textarea.style.position = 'fixed';
+            textarea.style.opacity = '0';
+            document.body.appendChild(textarea);
+            textarea.select();
+            try {
+                document.execCommand('copy');
+                showCopied();
+            } finally {
+                document.body.removeChild(textarea);
+            }
         }
         
         function updateZoomDisplay() {
@@ -584,8 +600,10 @@ Select an area on the map to generate command...
         }
         
         // Event listeners
-        document.getElementById('mapStyle').addEventListener('change', changeMapStyle);
-        document.getElementById('tileSource').addEventListener('change', generateCommand);
+        document.getElementById('tileSource').addEventListener('change', () => {
+            changeMapStyle();
+            generateCommand();
+        });
         document.getElementById('delay').addEventListener('input', generateCommand);
         document.getElementById('workers').addEventListener('input', generateCommand);
         document.getElementById('outputDir').addEventListener('input', generateCommand);

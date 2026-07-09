@@ -44,10 +44,14 @@ class CityLookup:
             response = self.session.get(base_url, params=params, timeout=10)
             response.raise_for_status()
             data = response.json()
-            
-            if not data:
-                return None
-            
+        except requests.exceptions.RequestException as e:
+            print(f"Error looking up coordinates for {query}: {e}")
+            return None
+
+        if not data:
+            return None
+
+        try:
             result = data[0]
             return {
                 'name': result.get('display_name', 'Unknown'),
@@ -55,9 +59,8 @@ class CityLookup:
                 'lon': float(result['lon']),
                 'type': result.get('type', 'unknown')
             }
-            
-        except Exception as e:
-            print(f"Error looking up coordinates for {query}: {e}")
+        except (KeyError, ValueError, TypeError) as e:
+            print(f"Unexpected response format looking up {query}: {e}")
             return None
     
     def get_bounding_box_for_cities(self, cities, buffer_km=10):
@@ -65,20 +68,23 @@ class CityLookup:
         all_coords = []
         
         print(f"Looking up coordinates for {len(cities)} cities...")
-        for city_info in cities:
+        for i, city_info in enumerate(cities):
             if isinstance(city_info, str):
                 city, state, country = city_info, None, None
             else:
                 city = city_info.get('city')
                 state = city_info.get('state')
                 country = city_info.get('country')
-            
+
             result = self.get_coordinates(city, state, country)
             if result:
                 all_coords.append(result)
                 print(f"✓ {city}: {result['lat']:.4f}, {result['lon']:.4f}")
             else:
                 print(f"✗ {city}: Not found")
+
+            if i < len(cities) - 1:
+                time.sleep(1)  # Respect Nominatim's ~1 request/sec usage policy
         
         if not all_coords:
             print("No valid coordinates found")
@@ -111,10 +117,11 @@ class CityLookup:
         }
 
 class MeshtasticTileGenerator:
-    def __init__(self, output_dir="tiles", tile_size=256, delay=0.1):
+    def __init__(self, output_dir="tiles", tile_size=256, delay=0.1, api_key=None):
         self.output_dir = Path(output_dir)
         self.tile_size = tile_size
         self.delay = delay  # Delay between requests to be respectful
+        self.api_key = api_key
         self.session = requests.Session()
         self.session.headers.update({
             'User-Agent': 'MeshtasticTileGenerator/1.0'
@@ -147,7 +154,10 @@ class MeshtasticTileGenerator:
             "terrain": f"https://tile.opentopomap.org/{zoom}/{x}/{y}.png",
             "cycle": f"https://tile.thunderforest.com/cycle/{zoom}/{x}/{y}.png"
         }
-        return sources.get(source, sources["osm"])
+        url = sources.get(source, sources["osm"])
+        if source == "cycle" and self.api_key:
+            url += f"?apikey={self.api_key}"
+        return url
     
     def download_tile(self, x, y, zoom, source="osm"):
         """Download a single tile"""
@@ -166,15 +176,15 @@ class MeshtasticTileGenerator:
         try:
             response = self.session.get(url, timeout=10)
             response.raise_for_status()
-            
+
             # Save the tile
             with open(tile_path, 'wb') as f:
                 f.write(response.content)
-            
+
             time.sleep(self.delay)  # Be respectful to tile servers
             return tile_path, True
-            
-        except Exception as e:
+
+        except (requests.exceptions.RequestException, OSError) as e:
             print(f"Error downloading tile {x},{y},{zoom}: {e}")
             return None, False
     
@@ -191,7 +201,10 @@ class MeshtasticTileGenerator:
         if east <= west:
             print("Error: East longitude must be greater than west longitude")
             return
-        
+        if min_zoom > max_zoom:
+            print("Error: --min-zoom must be less than or equal to --max-zoom")
+            return
+
         total_tiles = 0
         downloaded_tiles = 0
         
@@ -254,24 +267,46 @@ class MeshtasticTileGenerator:
         self.generate_metadata(north, south, east, west, min_zoom, max_zoom, source)
     
     def generate_metadata(self, north, south, east, west, min_zoom, max_zoom, source):
-        """Generate metadata file for Meshtastic"""
+        """Generate metadata file for Meshtastic, merging with any tiles already in this directory"""
+        metadata_path = self.output_dir / "metadata.json"
+
+        existing = None
+        if metadata_path.exists():
+            try:
+                with open(metadata_path, 'r') as f:
+                    existing = json.load(f)
+            except (json.JSONDecodeError, OSError) as e:
+                print(f"Warning: could not read existing metadata.json, it will be replaced: {e}")
+
+        sources = {source}
+        if existing:
+            prev_west, prev_south, prev_east, prev_north = existing.get('bounds', [west, south, east, north])
+            west = min(west, prev_west)
+            south = min(south, prev_south)
+            east = max(east, prev_east)
+            north = max(north, prev_north)
+            min_zoom = min(min_zoom, existing.get('minzoom', min_zoom))
+            max_zoom = max(max_zoom, existing.get('maxzoom', max_zoom))
+            sources.update(existing.get('sources', [existing.get('source')] if existing.get('source') else []))
+
         metadata = {
-            "name": f"Generated tiles ({source})",
-            "description": f"Map tiles for Meshtastic T-Deck",
+            "name": "Generated tiles",
+            "description": "Map tiles for Meshtastic T-Deck",
             "bounds": [west, south, east, north],
             "minzoom": min_zoom,
             "maxzoom": max_zoom,
             "format": "png",
             "type": "baselayer",
             "source": source,
+            "sources": sorted(sources),
             "generated": time.strftime("%Y-%m-%d %H:%M:%S")
         }
-        
-        metadata_path = self.output_dir / "metadata.json"
+
         with open(metadata_path, 'w') as f:
             json.dump(metadata, f, indent=2)
-        
+
         print(f"Metadata saved to: {metadata_path}")
+        print(f"Combined coverage: N:{north} S:{south} E:{east} W:{west}, zoom {min_zoom}-{max_zoom}, sources: {', '.join(sorted(sources))}")
     
     def create_sample_tile(self, text="Sample Tile"):
         """Create a sample tile for testing"""
@@ -281,7 +316,7 @@ class MeshtasticTileGenerator:
         # Try to use a font, fallback to default
         try:
             font = ImageFont.truetype("arial.ttf", 20)
-        except:
+        except OSError:
             font = ImageFont.load_default()
         
         # Draw text in center
@@ -329,7 +364,7 @@ def get_region_bounds(region):
         },
         'california': {
             'north': 42.0,   # Oregon border (correct)
-            'south': 32.5,   # Mexico border (should be 32.534 to be exact)
+            'south': 32.534, # Mexico border
             'east': -114.131, # Nevada/Arizona border (more precise)
             'west': -124.409  # Pacific coast (more precise)
         },
@@ -374,19 +409,27 @@ def main():
     parser.add_argument('--max-zoom', type=int, default=12, help='Maximum zoom level')
     parser.add_argument('--source', default='osm', choices=['osm', 'satellite', 'terrain', 'cycle'],
                         help='Map source')
+    parser.add_argument('--api-key', type=str, default=None,
+                        help='API key for sources that require one (currently: cycle/Thunderforest)')
     parser.add_argument('--output-dir', default='tiles', help='Output directory')
     parser.add_argument('--delay', type=float, default=0.2, help='Delay between requests (seconds)')
     parser.add_argument('--max-workers', type=int, default=3, help='Maximum concurrent downloads')
     parser.add_argument('--sample-only', action='store_true', help='Generate sample tile only')
-    
+
     args = parser.parse_args()
-    
+
+    if args.source == 'cycle' and not args.api_key:
+        print("Error: --source cycle requires a Thunderforest API key. Pass one with --api-key.")
+        print("Get a free key at: https://www.thunderforest.com/docs/apikeys/")
+        return
+
     # Create generator
     generator = MeshtasticTileGenerator(
         output_dir=args.output_dir,
-        delay=args.delay
+        delay=args.delay,
+        api_key=args.api_key
     )
-    
+
     if args.sample_only:
         generator.create_sample_tile()
         return
@@ -446,7 +489,10 @@ def main():
     if north is None:
         print("Error: Could not determine coordinates")
         return
-    
+    if args.min_zoom > args.max_zoom:
+        print("Error: --min-zoom must be less than or equal to --max-zoom")
+        return
+
     # Warning for large areas
     if args.region in ['north_america', 'usa', 'canada']:
         print("⚠️  WARNING: Large region selected!")
