@@ -340,13 +340,27 @@ Select an area on the map to generate command...
         let currentTileLayer = null;
         
         // Map tile layers (mirrors the --source choices in meshtastic_tiles.py).
-        // Note: cycle requires a Thunderforest API key, same as the CLI's --api-key -
-        // without one this preview layer will show broken/blank tiles.
+        // "osm" here uses CARTO's OSM-based basemap rather than raw
+        // tile.openstreetmap.org, because OSM's tile servers now require a
+        // Referer header (osm.wiki/Blocked) and browsers never send one from
+        // a page opened as a local file:// - which is how this GUI is meant
+        // to be used. This only affects the preview; the actual tiles
+        // downloaded by --source osm are unaffected (that's a server-side
+        // Python request handled separately, see meshtastic_tiles.py).
+        // Note: cycle requires a Thunderforest API key, same as the CLI's
+        // --api-key - without one this preview layer will show broken tiles.
         const tileLayers = {
-            osm: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            osm: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
             satellite: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
             terrain: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
             cycle: 'https://{s}.tile.thunderforest.com/cycle/{z}/{x}/{y}.png'
+        };
+
+        const tileAttributions = {
+            osm: '© OpenStreetMap contributors, © CARTO',
+            satellite: 'Tiles © Esri',
+            terrain: '© OpenTopoMap contributors (CC-BY-SA)',
+            cycle: '© OpenStreetMap contributors, © Thunderforest'
         };
 
         // Initialize map
@@ -355,7 +369,7 @@ Select an area on the map to generate command...
 
             // Add default tile layer
             currentTileLayer = L.tileLayer(tileLayers.osm, {
-                attribution: '© OpenStreetMap contributors'
+                attribution: tileAttributions.osm
             }).addTo(map);
 
             // Add selection functionality (Shift+drag selects, normal drag pans)
@@ -438,7 +452,7 @@ Select an area on the map to generate command...
             }
 
             currentTileLayer = L.tileLayer(tileLayers[style], {
-                attribution: style === 'osm' ? '© OpenStreetMap contributors' : '© Map tiles'
+                attribution: tileAttributions[style] || '© Map tiles'
             }).addTo(map);
         }
         

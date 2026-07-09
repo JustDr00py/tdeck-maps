@@ -27,6 +27,27 @@ python meshtastic_tiles.py --city "San Francisco" --min-zoom 8 --max-zoom 12
 - **💾 Resume support**: Skips already downloaded tiles
 - **🎯 T-Deck optimized**: Default settings perfect for T-Deck storage and screen
 
+## 🖱️ Visual GUI (`maps.html`)
+
+Prefer picking an area on a map instead of typing coordinates? Open
+`maps.html` in a browser: drag to pan/zoom, hold **Shift** and drag to select
+an area, set your zoom levels and source, then copy the generated
+`meshtastic_tiles.py` command it builds for you.
+
+You can just double-click `maps.html` to open it directly (`file://`) - the
+map preview uses a CDN that works fine that way. If you'd rather see the
+exact OpenStreetMap tile style in the preview, serve the folder over HTTP
+instead, since raw `tile.openstreetmap.org` requires a `Referer` header that
+browsers only send for `http(s)://` pages, not local files:
+
+```bash
+python3 -m http.server 8080
+# then open http://localhost:8080/maps.html
+```
+
+Either way, the actual tiles downloaded by the CLI use whatever `--source`
+you pick - the GUI's map preview is just a visual aid for selecting an area.
+
 ## 🎯 Usage Methods
 
 ### ⚠️ Important: Handling Spaces in City Names
