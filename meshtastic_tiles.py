@@ -19,7 +19,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 # Identifies this tool to tile/geocoding servers per their usage policies
 # (e.g. https://osmfoundation.org/wiki/Policies/tile_usage_policy), which ask
 # for a way to identify and contact the operator of automated traffic.
-USER_AGENT = 'tdeck-maps/1.1 (+https://github.com/JustDr00py/tdeck-maps)'
+USER_AGENT = 'tdeck-maps/2.0 (+https://github.com/JustDr00py/tdeck-maps)'
 
 
 class RateLimiter:
@@ -183,14 +183,23 @@ class MeshtasticTileGenerator:
     def get_tile_url(self, x, y, zoom, source="osm"):
         """Get tile URL for different map sources"""
         sources = {
-            "osm": f"https://tile.openstreetmap.org/{zoom}/{x}/{y}.png",
+            # MapTiler-hosted OpenStreetMap-style raster tiles, not raw
+            # tile.openstreetmap.org - see the "Tile Server Limits &
+            # Etiquette" section in README.md for why.
+            "osm": f"https://api.maptiler.com/maps/openstreetmap/{zoom}/{x}/{y}.png",
             "satellite": f"https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{zoom}/{y}/{x}",
             "terrain": f"https://tile.opentopomap.org/{zoom}/{x}/{y}.png",
             "cycle": f"https://tile.thunderforest.com/cycle/{zoom}/{x}/{y}.png"
         }
+        # Query param name each provider expects its API key under.
+        key_params = {
+            "osm": "key",
+            "cycle": "apikey",
+        }
         url = sources.get(source, sources["osm"])
-        if source == "cycle" and self.api_key:
-            url += f"?apikey={self.api_key}"
+        key_param = key_params.get(source)
+        if key_param and self.api_key:
+            url += f"?{key_param}={self.api_key}"
         return url
     
     def download_tile(self, x, y, zoom, source="osm", max_attempts=3):
@@ -469,13 +478,20 @@ def main():
     parser.add_argument('--source', default='osm', choices=['osm', 'satellite', 'terrain', 'cycle'],
                         help='Map source')
     parser.add_argument('--api-key', type=str, default=None,
-                        help='API key for sources that require one (currently: cycle/Thunderforest)')
+                        help='API key for sources that require one (osm/MapTiler, cycle/Thunderforest)')
     parser.add_argument('--output-dir', default='tiles', help='Output directory')
     parser.add_argument('--delay', type=float, default=0.2, help='Delay between requests (seconds)')
     parser.add_argument('--max-workers', type=int, default=3, help='Maximum concurrent downloads')
     parser.add_argument('--sample-only', action='store_true', help='Generate sample tile only')
 
     args = parser.parse_args()
+
+    if args.source == 'osm' and not args.api_key:
+        print("Error: --source osm now uses MapTiler (not raw tile.openstreetmap.org - see")
+        print("README.md's 'Tile Server Limits & Etiquette' section for why) and requires an")
+        print("API key. Pass one with --api-key.")
+        print("Get a free key at: https://www.maptiler.com/cloud/")
+        return
 
     if args.source == 'cycle' and not args.api_key:
         print("Error: --source cycle requires a Thunderforest API key. Pass one with --api-key.")

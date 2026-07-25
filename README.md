@@ -2,6 +2,24 @@
 
 Generate offline map tiles for your Meshtastic T-Deck device! This tool downloads map tiles from various sources and organizes them in the format that Meshtastic expects for offline mapping.
 
+## ⚠️ Breaking Change: `--source osm` now requires a MapTiler API key
+
+The default map source (`--source osm`, also the GUI's "OpenStreetMap"
+option) used to download tiles directly from `tile.openstreetmap.org`. That's
+[a violation of OSM's tile usage policy](https://operations.osmfoundation.org/policies/tiles/),
+which explicitly prohibits bulk/automated downloading - exactly what this
+tool does. Retry/backoff logic added in earlier versions reduced how often
+that tripped OSM's abuse detection, but didn't make it compliant.
+
+`osm` now pulls MapTiler's hosted OpenStreetMap-style raster tiles instead,
+which explicitly permits this kind of use. This **requires a free API key**
+(sign up at [maptiler.com/cloud](https://www.maptiler.com/cloud/)) passed via
+`--api-key`; running with the old defaults and no key now fails fast with an
+explanatory error rather than silently working. `--source satellite` and
+`--source terrain` are unaffected (they never used OSM's tile servers) and
+still need no key. See [Tile Server Limits & Etiquette](#-tile-server-limits--etiquette)
+for the full rationale.
+
 ## 🚀 Quick Start
 
 1. **Install dependencies:**
@@ -9,19 +27,22 @@ Generate offline map tiles for your Meshtastic T-Deck device! This tool download
 pip install pillow requests
 ```
 
-2. **Generate tiles for your city:**
+2. **Get a free MapTiler API key** (needed for the default `osm` source):
+   [maptiler.com/cloud](https://www.maptiler.com/cloud/)
+
+3. **Generate tiles for your city:**
 ```bash
-python meshtastic_tiles.py --city "San Francisco" --min-zoom 8 --max-zoom 12
+python meshtastic_tiles.py --city "San Francisco" --min-zoom 8 --max-zoom 12 --api-key YOUR_MAPTILER_KEY
 ```
 
-3. **Copy the `tiles` folder to your T-Deck's SD card**
+4. **Copy the `tiles` folder to your T-Deck's SD card**
 
-4. **Configure Meshtastic to use offline tiles**
+5. **Configure Meshtastic to use offline tiles**
 
 ## 📋 Features
 
 - **🏙️ City-based generation**: Just specify city names, no coordinate lookup needed
-- **🗺️ Multiple map sources**: OpenStreetMap, satellite imagery, terrain, cycle maps
+- **🗺️ Multiple map sources**: OpenStreetMap (via MapTiler), satellite imagery, terrain, cycle maps
 - **⚡ Fast downloads**: Multi-threaded downloading with rate limiting
 - **📦 Smart bounding boxes**: Automatically calculates optimal coverage areas
 - **💾 Resume support**: Skips already downloaded tiles
@@ -31,24 +52,26 @@ python meshtastic_tiles.py --city "San Francisco" --min-zoom 8 --max-zoom 12
 
 Prefer picking an area on a map instead of typing coordinates? Open
 `maps.html` in a browser: drag to pan/zoom, hold **Shift** and drag to select
-an area, set your zoom levels and source, then copy the generated
-`meshtastic_tiles.py` command it builds for you.
+an area, set your zoom levels and source, enter an API key if the source
+needs one, then copy the generated `meshtastic_tiles.py` command it builds
+for you (it includes `--api-key` automatically when required).
 
 You can just double-click `maps.html` to open it directly (`file://`) - the
-map preview uses a CDN that works fine that way. If you'd rather see the
-exact OpenStreetMap tile style in the preview, serve the folder over HTTP
-instead, since raw `tile.openstreetmap.org` requires a `Referer` header that
-browsers only send for `http(s)://` pages, not local files:
+map preview works fine that way, including the MapTiler-backed `osm` preview.
+The **API Key** field in the sidebar is required for the `OpenStreetMap`
+source (get a free MapTiler key) and the `Cycle` source (Thunderforest key);
+a warning appears under the field if a key is needed but missing. `Satellite`
+and `Terrain` don't need a key.
 
-```bash
-python3 -m http.server 8080
-# then open http://localhost:8080/maps.html
-```
-
-Either way, the actual tiles downloaded by the CLI use whatever `--source`
+The actual tiles downloaded by the CLI use whatever `--source`/`--api-key`
 you pick - the GUI's map preview is just a visual aid for selecting an area.
 
 ## 🎯 Usage Methods
+
+> **Note:** The commands below omit `--source`/`--api-key` for brevity, but
+> the default `osm` source now requires `--api-key YOUR_MAPTILER_KEY` (see
+> [Map Sources](#-map-sources)) - add it to any command that doesn't already
+> pass `--source satellite` or `--source terrain`.
 
 ### ⚠️ Important: Handling Spaces in City Names
 
@@ -143,21 +166,25 @@ python meshtastic_tiles.py --coords --north 40.8 --south 40.6 --east -74.0 --wes
 
 ## 🗺️ Map Sources
 
-Choose different map types with the `--source` option:
+Choose different map types with the `--source` option. `osm` and `cycle`
+require an `--api-key`; `satellite` and `terrain` don't:
 
 ```bash
-# Standard street map (default)
-python meshtastic_tiles.py --city "Denver" --source osm
+# Standard street map, MapTiler-backed (default) - needs a MapTiler key
+python meshtastic_tiles.py --city "Denver" --source osm --api-key YOUR_MAPTILER_KEY
 
-# Satellite imagery
+# Satellite imagery - no key needed
 python meshtastic_tiles.py --city "Denver" --source satellite
 
-# Topographic/terrain
+# Topographic/terrain - no key needed
 python meshtastic_tiles.py --city "Denver" --source terrain
 
-# Cycling-focused
-python meshtastic_tiles.py --city "Denver" --source cycle
+# Cycling-focused - needs a Thunderforest key
+python meshtastic_tiles.py --city "Denver" --source cycle --api-key YOUR_THUNDERFOREST_KEY
 ```
+
+Get a free MapTiler key at [maptiler.com/cloud](https://www.maptiler.com/cloud/)
+and a free Thunderforest key at [thunderforest.com/docs/apikeys](https://www.thunderforest.com/docs/apikeys/).
 
 ## 🔍 Zoom Levels Guide
 
@@ -260,7 +287,16 @@ python meshtastic_tiles.py --sample-only
 `tile.openstreetmap.org` is a volunteer-run, donation-funded service, and its
 [tile usage policy](https://osmfoundation.org/wiki/Policies/tile_usage_policy)
 explicitly restricts **bulk downloading** - which is exactly what this tool
-does. To stay as respectful as possible of shared infrastructure, the script:
+does. Earlier versions of this tool downloaded the `osm` source directly from
+`tile.openstreetmap.org`; that's why `--source osm` now uses
+[MapTiler](https://www.maptiler.com/cloud/)'s hosted OpenStreetMap-style
+tiles instead (via `--api-key`), whose terms explicitly permit this kind of
+bulk/offline use. `satellite` (Esri) and `terrain` (OpenTopoMap) were never
+affected, since neither hits OSM's tile servers.
+
+The script still behaves respectfully toward whichever provider you use,
+since free-tier API keys and self-hosted servers have their own rate limits
+too:
 
 - Sends a descriptive `User-Agent` identifying the tool and a contact URL
 - Enforces a **global** rate limit (`--delay` seconds between requests, no
@@ -270,17 +306,14 @@ does. To stay as respectful as possible of shared infrastructure, the script:
   backoff, but treats `403 Access Blocked` as a hard stop rather than
   hammering the server further
 
-None of that makes large bulk downloads compliant with OSM's policy, though -
-it just reduces the odds of tripping their abuse detection for moderate use
-(a handful of cities). If you're generating tiles regularly, for many
-cities/regions, or for a team, please don't rely on the public OSM tile
-server. Better options:
+If you're generating tiles regularly, for many cities/regions, or for a team,
+consider these alternatives to a free-tier API key:
 
 - **Run your own tile server** from an OSM extract (see
   [switch2osm.org](https://switch2osm.org/serving-tiles/)) and point
   `get_tile_url()` at it
-- **Use a paid provider** that explicitly permits bulk/offline export (e.g.
-  Thunderforest with `--api-key`, MapTiler, Stadia Maps)
+- **Use a higher MapTiler/Thunderforest tier**, or another paid provider that
+  explicitly permits bulk/offline export (e.g. Stadia Maps)
 - **Use a source built for offline extracts**, like
   [Protomaps](https://protomaps.com), instead of fetching individual tile
   URLs
@@ -316,11 +349,11 @@ server. Better options:
 - Check if your ISP is throttling requests
 
 **"403 Access Blocked" errors:**
-- You've tripped the tile server's usage policy - see
+- If you're using `--source osm` or `--source cycle`, check that you passed a
+  valid `--api-key` - a missing or invalid key is the most likely cause now
+- Otherwise you've tripped the tile provider's rate limits - see
   [Tile Server Limits & Etiquette](#-tile-server-limits--etiquette)
 - Lower `--max-workers` (try 1-2) and raise `--delay` (try 0.5+), then retry
-- If it persists, switch `--source` or use your own/paid tile source instead
-  of the public OSM server
 
 **Out of storage:**
 - Reduce zoom range (try 8-11 instead of 8-14)
@@ -341,7 +374,9 @@ Common improvements needed:
 ## 📄 License
 
 This tool is for personal/educational use. Please respect the terms of service of map tile providers:
-- OpenStreetMap: [Tile Usage Policy](https://operations.osmfoundation.org/policies/tiles/)
-- Other sources: Check their individual terms
+- MapTiler (default `osm` source): [Terms of Service](https://www.maptiler.com/terms/)
+- OpenStreetMap (raw tile usage policy, no longer used by default): [Tile Usage Policy](https://operations.osmfoundation.org/policies/tiles/)
+- OpenStreetMap Nominatim (geocoding): [Usage Policy](https://operations.osmfoundation.org/policies/nominatim/)
+- Other sources (Esri, OpenTopoMap, Thunderforest): Check their individual terms
 
 Happy mapping! 🗺️📡

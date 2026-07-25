@@ -275,13 +275,22 @@
             <div class="control-group">
                 <h3>🗺️ Map Source</h3>
                 <select id="tileSource">
-                    <option value="osm">OpenStreetMap</option>
+                    <option value="osm">OpenStreetMap (MapTiler)</option>
                     <option value="satellite">Satellite</option>
                     <option value="terrain">Terrain</option>
                     <option value="cycle">Cycle</option>
                 </select>
+                <div class="form-row">
+                    <label>API Key:</label>
+                    <input type="text" id="apiKey" placeholder="Required for OpenStreetMap/Cycle">
+                </div>
+                <div id="apiKeyWarning" class="hidden" style="font-size: 0.8rem; color: #e74c3c; margin-bottom: 0.5rem;">
+                    This source needs an API key or tiles won't load. Get one free from
+                    <a href="https://www.maptiler.com/cloud/" target="_blank" rel="noopener">MapTiler</a> (OpenStreetMap) or
+                    <a href="https://www.thunderforest.com/docs/apikeys/" target="_blank" rel="noopener">Thunderforest</a> (Cycle).
+                </div>
             </div>
-            
+
             <div class="control-group">
                 <h3>⚙️ Advanced Options</h3>
                 <div class="form-row">
@@ -338,44 +347,89 @@ Select an area on the map to generate command...
         let isSelecting = false;
         let startPoint = null;
         let currentTileLayer = null;
+        let shiftHeld = false;
         
         // Map tile layers (mirrors the --source choices in meshtastic_tiles.py).
-        // "osm" here uses CARTO's OSM-based basemap rather than raw
-        // tile.openstreetmap.org, because OSM's tile servers now require a
-        // Referer header (osm.wiki/Blocked) and browsers never send one from
-        // a page opened as a local file:// - which is how this GUI is meant
-        // to be used. This only affects the preview; the actual tiles
-        // downloaded by --source osm are unaffected (that's a server-side
-        // Python request handled separately, see meshtastic_tiles.py).
-        // Note: cycle requires a Thunderforest API key, same as the CLI's
-        // --api-key - without one this preview layer will show broken tiles.
+        // "osm" uses MapTiler's hosted OpenStreetMap-style raster tiles, not
+        // raw tile.openstreetmap.org, same as the CLI's --source osm (see
+        // meshtastic_tiles.py get_tile_url() and README.md's "Tile Server
+        // Limits & Etiquette" section for why: OSM's tile usage policy
+        // prohibits bulk/automated downloading, which is exactly what this
+        // tool does). Both "osm" and "cycle" need an API key - {key} and
+        // {apikey} are Leaflet template placeholders filled in from the
+        // options object passed to L.tileLayer (see getTileLayerOptions()).
         const tileLayers = {
-            osm: 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
+            osm: 'https://api.maptiler.com/maps/openstreetmap/{z}/{x}/{y}.png?key={key}',
             satellite: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
             terrain: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
-            cycle: 'https://{s}.tile.thunderforest.com/cycle/{z}/{x}/{y}.png'
+            cycle: 'https://{s}.tile.thunderforest.com/cycle/{z}/{x}/{y}.png?apikey={apikey}'
         };
 
         const tileAttributions = {
-            osm: '© OpenStreetMap contributors, © CARTO',
+            osm: '© OpenStreetMap contributors, © MapTiler',
             satellite: 'Tiles © Esri',
             terrain: '© OpenTopoMap contributors (CC-BY-SA)',
             cycle: '© OpenStreetMap contributors, © Thunderforest'
         };
+
+        // Sources that require an API key, and which template placeholder
+        // (in tileLayers above) their key goes into.
+        const sourcesNeedingKey = { osm: 'key', cycle: 'apikey' };
+
+        function getTileLayerOptions(source) {
+            const options = { attribution: tileAttributions[source] || '© Map tiles' };
+            const keyParam = sourcesNeedingKey[source];
+            if (keyParam) {
+                options[keyParam] = document.getElementById('apiKey').value.trim();
+            }
+            return options;
+        }
 
         // Initialize map
         function initMap() {
             map = L.map('map').setView([39.7392, -104.9903], 8); // Denver
 
             // Add default tile layer
-            currentTileLayer = L.tileLayer(tileLayers.osm, {
-                attribution: tileAttributions.osm
-            }).addTo(map);
+            currentTileLayer = L.tileLayer(tileLayers.osm, getTileLayerOptions('osm')).addTo(map);
+            updateApiKeyWarning('osm');
 
-            // Add selection functionality (Shift+drag selects, normal drag pans)
+            // Add selection functionality (Shift+drag selects, normal drag pans).
+            // Dragging is disabled/enabled on the Shift keydown/keyup itself,
+            // not inside onMouseDown - Leaflet's own pan handler is wired
+            // directly to the map container's mousedown before this code
+            // runs, so disabling dragging from inside onMouseDown is a race
+            // it usually loses (the pan already started on that same
+            // mousedown), which made Shift+drag always pan instead of select.
+            document.addEventListener('keydown', onShiftKeyDown);
+            document.addEventListener('keyup', onShiftKeyUp);
+            // If the window loses focus while Shift is held (e.g. alt-tab),
+            // the keyup never reaches the page - reset so dragging doesn't
+            // stay stuck disabled.
+            window.addEventListener('blur', () => {
+                shiftHeld = false;
+                if (!isSelecting) {
+                    map.dragging.enable();
+                }
+            });
             map.on('mousedown', onMouseDown);
             map.on('mousemove', onMouseMove);
             map.on('mouseup', onMouseUp);
+        }
+
+        function onShiftKeyDown(e) {
+            if (e.key !== 'Shift' || shiftHeld) return;
+            shiftHeld = true;
+            if (!isSelecting) {
+                map.dragging.disable();
+            }
+        }
+
+        function onShiftKeyUp(e) {
+            if (e.key !== 'Shift') return;
+            shiftHeld = false;
+            if (!isSelecting) {
+                map.dragging.enable();
+            }
         }
 
         // Mouse event handlers for area selection
@@ -416,7 +470,9 @@ Select an area on the map to generate command...
             if (!isSelecting || !startPoint) return;
 
             isSelecting = false;
-            map.dragging.enable();
+            if (!shiftHeld) {
+                map.dragging.enable();
+            }
             const bounds = L.latLngBounds(startPoint, e.latlng);
 
             // Update form fields
@@ -451,9 +507,16 @@ Select an area on the map to generate command...
                 map.removeLayer(currentTileLayer);
             }
 
-            currentTileLayer = L.tileLayer(tileLayers[style], {
-                attribution: tileAttributions[style] || '© Map tiles'
-            }).addTo(map);
+            currentTileLayer = L.tileLayer(tileLayers[style], getTileLayerOptions(style)).addTo(map);
+            updateApiKeyWarning(style);
+        }
+
+        // Show/hide the "this source needs a key" warning based on the
+        // selected source and whether the API key field is filled in.
+        function updateApiKeyWarning(style) {
+            const needsKey = Boolean(sourcesNeedingKey[style]);
+            const hasKey = document.getElementById('apiKey').value.trim().length > 0;
+            document.getElementById('apiKeyWarning').classList.toggle('hidden', !needsKey || hasKey);
         }
         
         // Utility functions
@@ -513,17 +576,21 @@ Select an area on the map to generate command...
             const minZoom = document.getElementById('minZoom').value;
             const maxZoom = document.getElementById('maxZoom').value;
             const source = document.getElementById('tileSource').value;
+            const apiKey = document.getElementById('apiKey').value.trim();
             const delay = document.getElementById('delay').value;
             const workers = document.getElementById('workers').value;
             const outputDir = document.getElementById('outputDir').value;
-            
+
             if (!north || !south || !east || !west) {
                 document.getElementById('commandOutput').textContent = 'Select an area on the map first...';
                 return;
             }
-            
-            const command = `python meshtastic_tiles.py --coords --north ${north} --south ${south} --east ${east} --west ${west} --min-zoom ${minZoom} --max-zoom ${maxZoom} --source ${source} --delay ${delay} --max-workers ${workers} --output-dir ${outputDir}`;
-            
+
+            let command = `python meshtastic_tiles.py --coords --north ${north} --south ${south} --east ${east} --west ${west} --min-zoom ${minZoom} --max-zoom ${maxZoom} --source ${source} --delay ${delay} --max-workers ${workers} --output-dir ${outputDir}`;
+            if (sourcesNeedingKey[source]) {
+                command += apiKey ? ` --api-key ${apiKey}` : ' --api-key YOUR_API_KEY';
+            }
+
             document.getElementById('commandOutput').textContent = command;
         }
         
@@ -615,6 +682,10 @@ Select an area on the map to generate command...
         
         // Event listeners
         document.getElementById('tileSource').addEventListener('change', () => {
+            changeMapStyle();
+            generateCommand();
+        });
+        document.getElementById('apiKey').addEventListener('input', () => {
             changeMapStyle();
             generateCommand();
         });
