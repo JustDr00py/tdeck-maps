@@ -14,7 +14,7 @@ pip install pillow requests
 python meshtastic_tiles.py --city "San Francisco" --min-zoom 8 --max-zoom 12
 ```
 
-3. **Copy the `tiles` folder to your T-Deck's SD card**
+3. **Copy the `tiles` folder to your T-Deck's SD card under `maps` directory **
 
 4. **Configure Meshtastic to use offline tiles**
 
