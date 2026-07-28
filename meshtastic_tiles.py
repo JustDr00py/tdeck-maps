@@ -447,6 +447,30 @@ def get_region_bounds(region):
             'south': 54.4,   # Aleutian Islands
             'east': -129.9,  # Canadian border
             'west': -172.4   # Aleutian Islands
+        },
+        'malaysia': {
+            'north': 7.4,     # North of Banggi Island, Sabah (7.25°N)
+            'south': 0.8,     # South of Sarawak border
+            'east': 119.4,    # East of Tawau, Sabah
+            'west': 99.5      # West of Perak Island, Kedah (99.63°E)
+        },
+        'malaysia_peninsular': {
+            'north': 7.05,    # North of Perlis (northernmost ~6.95°N)
+            'south': 1.1,     # South of Tanjung Piai, Johor (1.268°N)
+            'east': 104.6,    # East coast buffer
+            'west': 99.5      # West of Perak Island, Kedah (99.63°E)
+        },
+        'malaysia_east': {
+            'north': 7.4,     # North of Banggi Island, Sabah (7.25°N)
+            'south': 0.8,     # South of Sarawak border
+            'east': 119.4,    # East of Tawau, Sabah
+            'west': 109.4     # West of Sematan, Sarawak (~109°E)
+        },
+        'singapore': {
+            'north': 1.55,    # North of Sembawang (1.4706°N)
+            'south': 1.1,     # South of Pulau Satumu (1.1594°N)
+            'east': 104.5,    # East of Pedra Branca (104.4075°E)
+            'west': 103.55    # West of Tuas (~103.60°E)
         }
     }
     return regions.get(region.lower())
@@ -457,7 +481,7 @@ def main():
     # Method selection (mutually exclusive)
     method_group = parser.add_mutually_exclusive_group(required=True)
     method_group.add_argument('--region', type=str, 
-                        choices=['north_america', 'usa', 'canada', 'mexico', 'california', 'texas', 'alaska'],
+                        choices=['north_america', 'usa', 'canada', 'mexico', 'california', 'texas', 'alaska', 'malaysia', 'malaysia_peninsular', 'malaysia_east', 'singapore'],
                         help='Predefined region')
     method_group.add_argument('--city', type=str, help='City name (e.g., "San Francisco" or "Portland, Oregon")')
     method_group.add_argument('--cities', type=str, help='Multiple cities separated by semicolons (e.g., "San Francisco; Oakland; San Jose")')

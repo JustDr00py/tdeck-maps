@@ -152,9 +152,15 @@ python meshtastic_tiles.py --region texas --min-zoom 6 --max-zoom 10
 # Countries/continents
 python meshtastic_tiles.py --region usa --min-zoom 4 --max-zoom 8
 python meshtastic_tiles.py --region north_america --min-zoom 4 --max-zoom 8
+
+# Southeast Asia
+python meshtastic_tiles.py --region malaysia --min-zoom 6 --max-zoom 10
+python meshtastic_tiles.py --region malaysia_peninsular --min-zoom 7 --max-zoom 11
+python meshtastic_tiles.py --region malaysia_east --min-zoom 7 --max-zoom 11
+python meshtastic_tiles.py --region singapore --min-zoom 10 --max-zoom 14
 ```
 
-**Available regions:** `north_america`, `usa`, `canada`, `mexico`, `california`, `texas`, `alaska`
+**Available regions:** `north_america`, `usa`, `canada`, `mexico`, `california`, `texas`, `alaska`, `malaysia`, `malaysia_peninsular`, `malaysia_east`, `singapore`
 
 ### Method 4: Custom Coordinates
 
